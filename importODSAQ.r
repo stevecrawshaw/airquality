@@ -178,11 +178,11 @@ if (includeMet) {
 }
 }
 
-DT <- importODSAQ(pollutant = "pm2.5",
-                  siteid = "all",
-                  dateFrom = "2018-01-01",
-                  dateTo = "2018-01-02")
-
-rm(importODSAQ)
+# DT <- importODSAQ(pollutant = "pm2.5",
+#                   siteid = "all",
+#                   dateFrom = "2018-01-01",
+#                   dateTo = "2018-01-02")
+# 
+# rm(importODSAQ)
 
 
