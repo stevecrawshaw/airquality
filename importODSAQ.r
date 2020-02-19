@@ -1,10 +1,10 @@
-importODSAQ <-
-  function(pollutant = c("all", "nox", "no2", "no", "pm10", "pm2.5", "o3"),
-           siteid = c("203", "215", "463", "270", "500", "501"),
-           dateFrom = "2018-01-01",
-           dateTo = "2018-01-02",
-           includeGeo = FALSE,
-           includeMet = FALSE) {
+# importODSAQ <-
+#   function(pollutant = c("all", "nox", "no2", "no", "pm10", "pm2.5", "o3"),
+#            siteid = c("203", "215", "463", "270", "500", "501"),
+#            dateFrom = "2018-01-01",
+#            dateTo = "2018-01-02",
+#            includeGeo = FALSE,
+#            includeMet = FALSE) {
 #function to easily import continuous air quality data from the opendatasoft
 #portal, using similar syntax to that used in openair functions, e.g. importAURN
 #
@@ -20,12 +20,12 @@ if (any(!has))
     install.packages(wants[!has])
 lapply(wants, library, character.only = T)
 #set variables for function testing
-# dateFrom  <-  "2019-12-01"
-# dateTo <-  "2019-12-02"
-# includeGeo <-  F
-# includeMet <-  F
-# siteid <- "all"
-# pollutant = c("o3", "nox", "pm10")
+dateFrom  <-  "2019-12-01"
+dateTo <-  "2019-12-02"
+includeGeo <-  F
+includeMet <-  F
+siteid <- "all"
+pollutant = c("no", "nox", "o3")
 #--------------------------------SET URLS AND VARIABLES-------------------
 headurl_aq <-
     "https://opendata.bristol.gov.uk/explore/dataset/air-quality-data-continuous/download/?format=csv&disjunctive.location=true&q="
@@ -53,14 +53,17 @@ if (!is_logical(c(includeGeo, includeMet))) {
 if (as.Date(dateFrom) - as.Date(dateTo) >= 0) {
     stop("The end date precedes or is equal to the start date.")
 }
-pollsites_url <- paste0("https://opendata.bristol.gov.uk/explore/dataset/air-quality-monitoring-sites/download/?format=csv&disjunctive.pollutants=true", paste0("&refine.pollutants=", toupper(pollutant), collapse =""), "&timezone=Europe/London&lang=en&use_labels_for_header=false&csv_separator=%3B")
+
+pollsites_url <- paste0("https://opendata.bristol.gov.uk/explore/dataset/air-quality-monitoring-sites/download/?format=csv&disjunctive.pollutants=true",
+                        paste0("&refine.pollutants=",
+                               toupper(str_replace_all(pollutant, "no2", "nox")), collapse =""),
+                        "&timezone=Europe/London&lang=en&use_labels_for_header=false&csv_separator=%3B")
 
 pollsites <- fread(pollsites_url)
 if (siteid != "all") {
     #siteids are selected - coerce to integer
     site_id <- as.integer(siteid)
-    assert_is_integer(site_id)
-
+    
 #---------------RETRIEVE VECTOR OF SITEIDS FOR POLLUTANTS SELECTED AND CREATE FACET url PART
    p_sites <- pollsites[siteid %in% site_id, siteid]
     #download a vector of the sites offering the selected pollutants
@@ -176,13 +179,15 @@ if (includeMet) {
 } else{
     setcolorder(aq_data_DT, neworder = c("date", "siteid", "location"))
 }
-}
 
-# DT <- importODSAQ(pollutant = "pm2.5",
-#                   siteid = "all",
-#                   dateFrom = "2018-01-01",
-#                   dateTo = "2018-01-02")
-# 
-# rm(importODSAQ)
+setkey(aq_data_DT, siteid, location, date)
+# }
+
+DT <- importODSAQ(pollutant = "pm2.5",
+                  siteid = "all",
+                  dateFrom = "2018-01-01",
+                  dateTo = "2018-01-02")
+
+rm(importODSAQ)
 
 
