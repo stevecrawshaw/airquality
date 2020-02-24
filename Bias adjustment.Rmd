@@ -1,0 +1,177 @@
+---
+title: "Bias Adjustment"
+author: "Bristol City Council"
+date: ""
+output: html_document
+fig_caption: yes
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#need to upgrade Rstudio to get a word output that formats tables nicely
+```
+
+```{R 1, eval = TRUE, include = FALSE}
+#rm(list = ls())
+wants <- c("odbc", "tidyverse", "DBI", "lubridate", "data.table", "kableExtra", "flextable")
+has   <- wants %in% rownames(installed.packages())
+if(any(!has)) install.packages(wants[!has])
+lapply(wants, library, character.only=T)
+Sys.setenv("tz" = "Etc/GMT-0")
+```
+
+```{R 2, eval = TRUE, include = FALSE}
+#setwd("S:\\SUSTAIN\\EnvQual\\Air_Quality\\Projects\\opendatasoft\\dashboard_demo")
+#setwd("c:\\store")
+yr <- 2018
+startdate <- as.POSIXct(paste0(as.character(yr-1), "-12-18"), format = "%Y-%m-%d")
+enddate <- as.POSIXct(paste0(as.character(yr+1), "-01-10"), format = "%Y-%m-%d")
+#parts of the ODSSQL url
+where_str <- paste0("date_time IN ['", as.character(startdate), "'TO'", as.character(enddate),"']")
+base_url <- "https://opendata.bristol.gov.uk/api/v2/catalog/datasets/air-quality-data-continuous/"
+select_raw_str <- "date_time as date, siteid, no2"
+qry_tubes <- "qry_18_NO2_raw_colloc_allyears"
+```
+
+# Summary data from co - located triplicate tubes
+
+```{R 3, eval = TRUE, echo = FALSE, warning = FALSE, results = "show"}
+#con <- dbConnect(odbc::odbc(), "NO2 database 2007") #DSN for the no2 tubes database
+#tripl_tubes <- dbReadTable(con, qry_tubes) %>%
+#        filter(dateOn > startdate, dateOff < enddate) %>%
+#        mutate(month_yr = paste0(as.character(month(floor((as.Date(dateOff) - as.Date(dateOn))/2)+ dateOn)),
+#                                 "_",
+#                                 as.character(yr))) %>%
+#        rename(continsite_ID = comments) %>% #the contin site ID is in the comments field
+#        group_by(SiteID, continsite_ID, dateOn, dateOff) %>%
+#        summarise(mean_no2 = mean(concentration, na.rm = T),
+#                  count_tube = n(),
+#                  sd_no2 = sd(concentration),
+#                 cv_no2 = (sd_no2 / mean_no2)*100,
+#                  ci_95 = (qt(0.975, df = (count_tube - 1))*sd_no2/sqrt(count_tube)))
+#dbDisconnect(con)
+#lubridate::hour(tripl_tubes$dateOn) <- 12 #make dateOn and dateOff midday
+#lubridate::hour(tripl_tubes$dateOff) <- 12
+
+tripl_tubes <- read_rds(path = paste0(here::here(), "/data/tripl_tubes.rds")) #just for demo
+
+
+```
+
+```{R 4, eval = TRUE, include = FALSE}
+#contin_data <- fread(rawdata_url) %>%
+#    mutate(date = as.POSIXct(date, format = "%Y-%m-%d %H:%M")) %>%
+#    select(date, siteid, no2) %>%
+#    arrange(date)
+contin_data <- read_rds(paste0(here::here(), "/data/contin_data.rds")) #just for demo
+```
+
+```{R 5, eval = TRUE, include = FALSE}
+period_means <- function(contin_data, start, stop, site){
+    mean_values <- contin_data %>% 
+        filter(siteid == site,
+               between(date, start, stop)) %>%
+        summarise(mean(no2, na.rm = T))
+    return(as.numeric(mean_values))
+}
+#function to dtermine data capture for period
+data_cap <- function(contin_data, start, stop, site){
+    na_counts <- contin_data %>% 
+        filter(siteid == site,
+               between(date, start, stop),
+               is.na(no2)) %>%
+        summarise(n()) 
+    
+    all_counts <- contin_data %>% 
+        filter(siteid == site,
+               between(date, start, stop)) %>%
+        summarise(n())
+    
+    return((as.numeric(all_counts) - as.numeric(na_counts))/as.numeric(all_counts)) #data capture for automatic in time period
+    #return(site)
+}
+
+```
+
+```{R 6, eval = TRUE, echo = FALSE, warning = FALSE, results = "show"}
+
+df_tube_contin <- tripl_tubes %>%
+    mutate(
+        periodmean = period_means(
+            contin_data = contin_data,
+            start = dateOn,
+            stop = dateOff,
+            site = continsite_ID
+        )
+    ) %>%
+    mutate(
+        data_capture = data_cap(
+            contin_data = contin_data,
+            start = dateOn,
+            stop = dateOff,
+            site = continsite_ID
+        )
+    ) %>%
+    mutate(baf = periodmean / mean_no2) %>% 
+    select(1:6, periodmean, count_tube, sd_no2, cv_no2, ci_95, data_capture, baf)
+
+#write_rds(df_tube_contin, path = paste0(here::here(), "/data/df_tube_contin.rds"))
+
+kable(df_tube_contin,
+      col.names = c(
+          "Location",
+          "Site ID",
+          "Automatic Site ID",
+          "Date On",
+          "Date Off",
+          "Mean NO~2~ (tubes)",
+          "Period mean (auto)",
+          "Count tubes",
+          "Sd",
+          "CV",
+          "95% CI",
+          "Data capture",
+          "BAF"
+      ), digits = 2,
+      caption = "Triplicate tube and automatic NO~2~ data")%>%
+    kable_styling(bootstrap_options = "striped", font_size = 12) %>% 
+    column_spec(1:3, bold = T) %>%
+    collapse_rows(columns = 1:3, valign = "top")
+
+```
+
+# Calculated bias and bias adjustment factors for co - located sites
+
+```{R 7, eval = TRUE, echo = FALSE, warning = FALSE, results = "show"}
+df_site_summary <- df_tube_contin %>%
+    group_by(location, continsite_ID) %>%
+    summarise(
+        year_BAF = mean(baf, na.rm = T),
+        mean_tubes = mean(mean_no2, na.rm = T),
+        mean_auto = mean(periodmean, na.rm = T)
+    ) %>%
+    mutate(bias_pc = ((mean_tubes - mean_auto) / mean_auto) * 100)
+
+kable(df_site_summary, col.names = c(
+          "Location",
+          "Continuous SiteID",
+          "BAF",
+          "Mean NO~2~ tubes",
+          "Mean NO~2~ continuous",
+          "Bias"
+      ),
+      digits = 2,
+      caption = "Summary Bias statistics for each site")%>%
+    kable_styling(bootstrap_options = "striped", font_size = 12) 
+```
+
+```{R 8, eval = TRUE, echo = FALSE, warning = FALSE, results = "show"}
+#calculate BAF from the reciprocal of 1+ the mean of the biases for each year 
+BAF <- df_site_summary %>%
+    ungroup() %>%
+    summarise(BAF = 1/(1+mean((bias_pc/100), na.rm = T)))
+```
+
+the Bias Adjustment Factor for `r yr` is `r round(BAF[[1]], 2)`
