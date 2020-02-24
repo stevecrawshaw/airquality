@@ -19,7 +19,7 @@ wants <- c("odbc", "tidyverse", "DBI", "lubridate", "data.table", "kableExtra", 
 has   <- wants %in% rownames(installed.packages())
 if(any(!has)) install.packages(wants[!has])
 lapply(wants, library, character.only=T)
-Sys.setenv("tz" = "Etc/GMT-0")
+Sys.setenv(TZ = "Etc/GMT-0")
 ```
 
 ```{R 2, eval = TRUE, include = FALSE}

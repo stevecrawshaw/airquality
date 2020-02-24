@@ -67,7 +67,7 @@ con <- dbConnect(odbc::odbc(),
                  Server    = "s-csssql6.ad.bcc.lan",
                  Database  = "Envista",
                  UID       = "envista",
-                 PWD       = "Env15ta#",
+                 PWD       = "*********",
                  Port      = 1433)
 #dbListTables(con)
 
