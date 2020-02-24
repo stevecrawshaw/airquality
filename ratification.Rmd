@@ -61,7 +61,7 @@ bia_pm10 <- rat_sites_DT[SiteName == "Bristol Airport" & Pollutants == "PM10", t
 ```
 
 ```{r database}
-#---------------------------------RETRIEVE DATA FROM ENVISTA SQL ---------------------
+#---------------------------------RETRIEVE DATA FROM ENVISTA SQL -------------------
 con <- dbConnect(odbc::odbc(),
                  Driver    = "SQL Server",
                  Server    = "s-csssql6.ad.bcc.lan",
