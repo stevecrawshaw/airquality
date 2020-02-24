@@ -32,7 +32,7 @@ enddate <- as.POSIXct(paste0(as.character(yr+1), "-01-10"), format = "%Y-%m-%d")
 where_str <- paste0("date_time IN ['", as.character(startdate), "'TO'", as.character(enddate),"']")
 base_url <- "https://opendata.bristol.gov.uk/api/v2/catalog/datasets/air-quality-data-continuous/"
 select_raw_str <- "date_time as date, siteid, no2"
-qry_tubes <- "qry_18_NO2_raw_colloc_allyears"
+qry_tubes <- "qry_18_NO2_raw_colloc_allyears" #qry string for the access dB query
 ```
 
 # Summary data from co - located triplicate tubes
@@ -55,7 +55,7 @@ qry_tubes <- "qry_18_NO2_raw_colloc_allyears"
 #lubridate::hour(tripl_tubes$dateOn) <- 12 #make dateOn and dateOff midday
 #lubridate::hour(tripl_tubes$dateOff) <- 12
 
-tripl_tubes <- read_rds(path = paste0(here::here(), "/data/tripl_tubes.rds")) #just for demo
+tripl_tubes <- read_rds(path = here::here("tripl_tubes.rds")) #just for demo
 
 
 ```
@@ -65,7 +65,7 @@ tripl_tubes <- read_rds(path = paste0(here::here(), "/data/tripl_tubes.rds")) #j
 #    mutate(date = as.POSIXct(date, format = "%Y-%m-%d %H:%M")) %>%
 #    select(date, siteid, no2) %>%
 #    arrange(date)
-contin_data <- read_rds(paste0(here::here(), "/data/contin_data.rds")) #just for demo
+contin_data <- read_rds(here::here("contin_data.rds")) #just for demo
 ```
 
 ```{R 5, eval = TRUE, include = FALSE}
@@ -171,7 +171,7 @@ kable(df_site_summary, col.names = c(
 #calculate BAF from the reciprocal of 1+ the mean of the biases for each year 
 BAF <- df_site_summary %>%
     ungroup() %>%
-    summarise(BAF = 1/(1+mean((bias_pc/100), na.rm = T)))
+    summarise(BAF = 1/(1 + mean((bias_pc / 100), na.rm = T)))
 ```
 
 the Bias Adjustment Factor for `r yr` is `r round(BAF[[1]], 2)`
