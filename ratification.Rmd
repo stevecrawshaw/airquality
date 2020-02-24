@@ -1,0 +1,224 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+---
+
+# Purpose
+
+To apply scaling factors and first line ratification processes to monthly data, and output plots and files of ratified data.
+
+Files can be imported to Envista or possibly injected straight into the database
+
+
+```{r libraries}
+wants <- c("odbc", "dbplyr", "lubridate", "openair", "googlesheets4", "tidyverse", "data.table", "here", "DBI")
+has   <- wants %in% rownames(installed.packages())
+if(any(!has)) install.packages(wants[!has])
+lapply(wants, library, character.only=T)
+Sys.setenv(TZ = "UTC")
+#, , "DBI""lubridate", "data.table", "openair", "googlesheets", "tidyverse"
+```
+
+```{r variables}
+
+#---------------DECLARE VARIABLES ------------------------
+startdate_char <- "2019-11-01"
+enddate_char <-  "2019-11-30"
+halfway <- paste0(str_sub(startdate_char, 1, 8), "15")
+
+startdatePOS <- as.POSIXct(strptime(paste0(startdate_char, "00:00"),
+                                    format = "%Y-%m-%d%H:%M",
+                                    tz = "UTC")) #use if specific date required
+
+enddatePOS <- as.POSIXct(strptime(paste0(enddate_char, "23:00"),
+                                   format = "%Y-%m-%d%H:%M",
+                                   tz = "UTC")) #use if specific date required
+
+halfwayPOS <- as.POSIXct(strptime(paste0(halfway, "12:00"),
+                                   format = "%Y-%m-%d%H:%M",
+                                   tz = "UTC")) #use if specific date required
+
+#load continmeta and filter for sites that need ratting
+rat_sites_DT <- fread(here::here("data", "continmeta.csv"))[
+  StatusLive & Authority != "Defra" & TableName != ""]
+
+#new column with table name for the envista dB
+rat_sites_DT[,table := ifelse(Pollutants == "NOx" | Pollutants == "NOx PM10",
+                   paste0(TableName, "T15"),
+                   paste0(TableName, "T60"))]
+
+#vector for the NOx only tables that can be batch processed
+(sitenames <- rat_sites_DT[Pollutants == "NOx", SiteID])
+
+nox_tables <- rat_sites_DT[Pollutants == "NOx", table]
+#table names for PM10 and Pm2.5 sites
+colston501 <- rat_sites_DT[SiteName == "Colston Avenue", table]
+parsonst_pm25_215 <- rat_sites_DT[SiteName == "Parson Street" & Pollutants == "PM2.5", table]
+bia_pm10 <- rat_sites_DT[SiteName == "Bristol Airport" & Pollutants == "PM10", table]
+  
+```
+
+```{r database}
+#---------------------------------RETRIEVE DATA FROM ENVISTA SQL ---------------------
+con <- dbConnect(odbc::odbc(),
+                 Driver    = "SQL Server",
+                 Server    = "s-csssql6.ad.bcc.lan",
+                 Database  = "Envista",
+                 UID       = "envista",
+                 PWD       = "Env15ta#",
+                 Port      = 1433)
+#dbListTables(con)
+
+#----------------------STANDARD BCC NOX SITES--------------------------
+#data from ppb channels
+noxdfs <- lapply(nox_tables, function(x) select(dbReadTable(con, x),
+                                        Date_Time,
+                                        Value1,
+                                        Status1,
+                                        Value2,
+                                        Status2,
+                                        Value3,
+                                        Status3) %>%
+                filter(between(Date_Time, startdatePOS, enddatePOS)))
+#use lapply to select relevant columns for each site in the vector using
+#readtable function
+#filter for the selected month
+
+#-------------------Colston the Data.Table Way--------------------
+#collect NOx data as ppb
+
+#NOX CHANNELS ARE NOT THE NORMAL WAY ROUND!
+
+df.colstonDT <- dbReadTable(con, colston501) %>% 
+    select(Date_Time, Value1, Status1, Value2, Status2, Value3, Status3, Value9, Status9) %>%     filter(between(Date_Time, startdatePOS, enddatePOS)) %>% setDT()
+
+
+colstonDT <- df.colstonDT[, .(Date_Time = as.POSIXct(Date_Time, format = "%Y-%m-%d %H:%M", tz = "UTC"), siteid = 501L,
+          no2_raw = ifelse(Status1 != 1, NA, Value1),
+          no_raw = ifelse(Status2 != 1, NA, Value2),
+          nox_raw = ifelse(Status3 != 1, NA, Value3),
+          pm10 = ifelse(Status9 != 1, NA, Value9))]
+
+#-----------------PARSON STREET (PM2.5) with dplyr transmute-------------------
+    df_parsonst_pm25_215 <- dbReadTable(con, parsonst_pm25_215) %>%
+        select(Date_Time, Value9, Status9) %>%
+        filter(between(Date_Time, startdatePOS, enddatePOS)) %>%
+        transmute(
+            date = as.POSIXct(strptime(Date_Time, format = "%Y-%m-%d %H:%M", tz = "UTC")),
+            site = 215,
+            pm2.5 = replace(Value9, Status9 != 1, NA)) 
+#---------------------AIRPORT PM10 ------------------------------------
+bia_pm_DT <- dbReadTable(con, bia_pm10) %>%
+        select(Date_Time, Value3, Status3) %>%
+        filter(between(Date_Time, startdatePOS, enddatePOS)) %>%
+        transmute(
+            date = as.POSIXct(strptime(Date_Time, format = "%Y-%m-%d %H:%M", tz = "UTC")),
+            site = 573,
+            pm10 = replace(Value3, Status3 != 1, NA))
+
+con %>% dbDisconnect() %>% rm() #disconnect and close db connection
+
+```
+
+```{r data wrangling}
+#----------------ASSEMBLE DF's INTO SINGLE DF------------------------
+names.df <- Map(cbind, noxdfs, siteid = sitenames)
+
+#add new columns to each df in the list from the vectors sitenames
+#Map is simplified mapply
+#use data.table::rbindlist to assembe DT from list of retrieved tables
+#replace Values with NA if status !=1
+
+sites.df <- rbindlist(names.df)[, `:=`(no2_raw = ifelse(Status1 != 1, NA, Value1),
+                nox_raw = ifelse(Status2 != 1, NA, Value2),
+                no_raw = ifelse(Status3 != 1, NA, Value3))][,-(Value1:Status3)]
+
+nox_sitesDT <- rbindlist(list(sites.df, colstonDT), fill = T) %>% 
+  select(-pm10) %>% 
+  mutate(period = ifelse(Date_Time < as.Date(halfway), 1, 2))
+
+saveRDS(nox_sitesDT, here::here("data", "nox_sites_DT.rds"))
+
+nox_sitesDT <- readRDS(here::here("data", "nox_sites_DT.rds"))
+
+```
+
+```{r get and apply scaling factors to NOx data}
+#register (once)
+#OAuth access credentials in the folder 'C:/Users/brplsec/.R/gargle/gargle-oauth' 
+# sheets_auth()
+
+#get the sheet and extract the relevant data
+scale_factors_DF <- read_sheet(ss = "https://docs.google.com/spreadsheets/d/1MiHboRlWD1whTzOlIu37p5NnjuVAg2kmHrdzDLefkE0/edit#gid=539195387", sheet = "Workings", range = "G80:N200", col_names = c("NOVs", "NOxVs", "site", "date", "nox_zero", "nox_sensitivity", "no_zero", "no_sensitivity"), col_types = "ddcDdddd") %>% na.omit() %>% 
+  filter(between(date, startdatePOS, enddatePOS)) %>% 
+  rename(rat_date = date) %>% 
+  mutate(period = ifelse(rat_date < as.Date(halfway), 1, 2))
+#check that there are enough rats
+
+numrats <- nrow(rat_sites_DT[str_sub(Pollutants, 1, 3) == "NOx"]) * 2
+ratsOK <- ifelse(nrow(scale_factors_DF) == numrats, T, F)
+siterefs <- rat_sites_DT[,1:2]
+
+# apply scaling factors if they are all available
+if (ratsOK){
+rat_data_DT <- inner_join(nox_sitesDT, siterefs, by = c("siteid" = "SiteID")) %>% 
+  inner_join(scale_factors_DF, by = c("SiteName" = "site", "period" = "period")) %>% 
+  mutate(nox_rat = nox_sensitivity * (nox_raw - nox_zero),
+         no_rat = no_sensitivity * (no_raw - no_zero),
+         no2_rat = nox_rat - no_rat)
+} else {
+"Incorrect number of rats for the period, proceed manually"
+}
+
+```
+
+```{r plot NOx data for checking rats}
+rat_data_plot <- rat_data_DT %>% 
+  select(date = Date_Time, site = SiteName, siteid, period, nox_rat:no2_rat, nox_raw, no_raw, no2_raw) %>% 
+  pivot_longer(cols = nox_rat:no2_raw, names_to = "pollutant_status", values_to = "concentration") %>% separate(col = pollutant_status, into = c("pollutant", "status"), sep = "_", remove = F)
+
+rat_data_plot %>% 
+  filter(pollutant == "nox") %>% 
+  ggplot(aes(x = date, y = concentration, color = status)) +
+  geom_point() +
+  facet_wrap( ~ site)
+```
+```{r plot factor changes}
+
+scale_factors_plot <- scale_factors_DF %>% 
+  select(-c(1:2)) %>% 
+  pivot_longer(cols = nox_zero:no_sensitivity, names_to = "factor", values_to = "value")
+
+scale_factors_plot %>% 
+  ggplot() +
+    geom_line(aes(x = rat_date, y = value, color = factor), lwd = 1) +
+  facet_wrap(~ site) +
+  labs(title = "Change in scaling factors between calibration dates",
+       x = "Calibration date")
+
+```
+
+```{r assemble PM data}
+#make hourly PM10 for colston
+colstonDT_pm10_hr <- colstonDT[,.(date = Date_Time,
+                                  site = siteid,
+                                  pm10)] %>% 
+  timeAverage(avg.time = "hour", type = "site") %>% 
+  ungroup()
+#bind to one DT
+all_pm_DT <- rbindlist(list(bia_pm_DT, colstonDT_pm10_hr, df_parsonst_pm25_215), fill = T)
+
+pm_faults <- all_pm_DT %>% 
+  group_by(faults = pm10 > 200 | pm2.5 > 200, site) %>% 
+  summarise(n = n()) %>% 
+  na.omit()
+
+timePlot(all_pm_DT,
+         pollutant = c("pm10", "pm2.5"),
+         type = "site")
+pm_rat <- all_pm_DT[pm10 < 200 | pm2.5 < 200]
+
+
+```
