@@ -292,13 +292,13 @@ city_plot_covid_by_year <- core_means_joined %>%
   filter(!is.na(no2), site_type == "Urban Traffic") %>% 
   ggplot(aes(x = City, y = no2, fill = as.factor(year))) +
   geom_col(position = "dodge") + 
-scale_color_brewer(palette = "Dark2") +
   scale_y_continuous(quickText("NO2 ug m-3")) +
   labs(title = quickText("Changes in NO2 at core city urban traffic sites in lockdown period"),
        x = "City") +
   labs(fill = "Year") +
   theme(axis.text.x = element_text(angle = 90, hjust = 1, size=13)) +
   theme_ppt_single() +
+  scale_color_brewer(palette = "Dark2") +
   theme(axis.text.x = element_text(angle = 90),
          panel.grid.major = element_blank()) 
 
@@ -326,7 +326,7 @@ colston <- sites_weekly %>%
   ggplot(aes(x = date, y = Concentration, fill = Pollutant)) +
     geom_col(position = "dodge") + 
     scale_y_continuous(quickText("ug m-3")) +
-    labs(x = "Date", title = "Changes in daily mean concentrations by year in lockdown periods: Colston Avenue", caption = "Operational issues 9th April to 16th April 2020") + 
+    labs(x = "Date", title = "Changes in weekly mean concentrations by year in lockdown periods: Colston Avenue", caption = "Operational issues 9th April to 16th April 2020") + 
 scale_color_brewer(palette = "Dark2") +
          facet_wrap(~ as.factor(year), scales = "free_x") 
 
@@ -344,8 +344,7 @@ siteplot <- sites_weekly %>%
   ggplot(aes(x = as.Date(date), y = Concentration, fill = Pollutant)) +
     geom_col(position = "dodge") +
     scale_y_continuous(quickText("ug m-3")) +
-    labs(x = "Date", title = "Changes in daily mean concentrations in lockdown periods: Wells Road") + 
-scale_color_brewer(palette = "Dark2") +
+    labs(x = "Date", title = "Changes in weekly mean concentrations in lockdown periods: Wells Road") + scale_color_brewer(palette = "Dark2") +
      facet_wrap(~ as.factor(year), scales = "free_x") 
 
 siteplot +
@@ -420,7 +419,7 @@ windRose(met_data_DT_hr[between(yday(date), lockdown_start_julian, lockdown_end_
 ### De - weathering ambient air quality measurements
 The deweather functions of the [openair package](https://cran.r-project.org/web/packages/openair/index.html) were used to remove the effect of the weather on concentrations of regulated pollutant measured by Bristol City Council's and Defra's monitoring sites in Bristol. The deweather package uses a boosted regression tree approach for modelling air quality data. This technique builds a statistical model of the air quality data and thereby takes account of the many complex interactions between variables as well as non-linear relationships between the variables.
 
-Predictions of daily mean concentrations are derived from the modelled hourly means of data that are aggregated by site type. The accepted classifications of "Urban Background" (distant from busy road) and "Urban Traffic" (close to busy road) were used, as well as a classification of "City Centre" to cover the most polluted site, Colston Avenue, as this site represents the most polluted air in the city. The table below shows the classes for each of the sites used in the analysis.
+Predictions of daily mean concentrations are derived from the modelled hourly means of data that are aggregated by site type. The accepted classifications of "Urban Background" (distant from busy road) and "Urban Traffic" (close to busy road) were used, as well as a classification of "City Centre" to cover the most polluted site, Colston Avenue, as this site represents the most polluted air in the city. Sites with a data capture less than 90% are not used in the analysis. The table below shows the classes for each of the sites analysed.
 
 ```{r table sites, eval = TRUE, echo = FALSE, warning = FALSE, message = FALSE, results = "show", fig.height = 7, fig.width = 10, fig.cap = "Fig . Sites aggregated for model analysis"}
 
@@ -510,14 +509,14 @@ dwp_plot <- deweathered_predictions %>%
   rename(`Site type` = dw_group) %>%
   ungroup() %>% 
   mutate(pollutant = toupper(pollutant)) %>% 
-  ggplot(aes(x = date, y = pred, color = `Site type`)) +
+  ggplot(aes(x = date, y = pred, color = `Site type`))  +
+  geom_rect(data = rdf_P, mapping = aes(x = NULL, y = NULL, xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = fill), alpha = 0.1, color = "black", lty = "dashed") +
+  scale_fill_manual(values = c("#00AFBB", "#FC4E07")) +
   geom_line(lwd = 2) +
   scale_color_brewer(palette = "Dark2") +
   labs(title = "Daily mean de - weathered predictions of pollutant concentrations", subtitle = "Bristol: 2020", caption = "Operational issues at city centre site: April 9th to April 16th", fill = "Period", y = quickText("Predicted concentration ( ugm-3 )"), x = "Date") +
   facet_grid(pollutant ~ ., scales = "free_y") +
   theme_report_facet() +
-  geom_rect(data = rdf_P, mapping = aes(x = NULL, y = NULL, xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = fill), alpha = 0.1, color = "black", lty = "dashed") +
-  scale_fill_manual(values = c("#00AFBB", "#FC4E07")) +
   easy_plot_legend_size(size = 14) +
   easy_plot_legend_title_size(size = 16) +
   theme(strip.text.y = element_text(color = "black", face = "bold", size = 14, angle = 0))
@@ -552,7 +551,7 @@ Cusum charts were plotted for sites measuring NOx during March 2020. Cusum chart
 It can be seen that all sites showed a declining trace from the beginning of March. This is inline with the national picture of declining concentrations of NOx under "business as usual" because of improving engine technology. However, all sites also show an inflection of the trace around the time of the period between the social distancing edict and lockdown proper. There is some evidence that the cusum trace is levelling off towards the end of the analysis period, which is to be expected, as traffic flows stabilise at a minimum or even start to increase.
 
 ```{r cusum analysis, eval = TRUE, echo = FALSE, warning = FALSE, message = FALSE, results = "hide", fig.height = 7, fig.width = 10, , fig.show = "show", fig.cap = "Fig . Cusum analysis of Bristol NOx data"}
-means <- function(...) mean(c(...), na.rm = T)
+
 cusum_plot_data <- 
   aq_data_DT %>% 
   select(date, code = siteid, site = location, nox) %>% 
@@ -574,6 +573,8 @@ cusum_plot_data <-
 
 cusum_plot <- cusum_plot_data %>% 
     ggplot(aes(x = date, y = cumsum_delta)) +
+ geom_rect(data = rect_df, mapping = aes(x = NULL, y = NULL, xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = fill), alpha = 0.3, color = "black", lty = "dashed") +
+  scale_fill_manual(values = c("#00AFBB", "#FC4E07")) +
   geom_line(lwd = 2, color = "black") +
     # geom_smooth(se = F, lwd = 1, color = "black", method = "loess", formula = 'y ~ x') +
     facet_wrap( ~ site, scales = "free_y") +
@@ -581,8 +582,6 @@ cusum_plot <- cusum_plot_data %>%
        subtitle = "2020 data compared with mean daily concentrations in 2018 - 2019",
        x = "Date:2020", y = "Cumulative sum of difference in daily NOx",
        fill = "Period") +
- geom_rect(data = rect_df, mapping = aes(x = NULL, y = NULL, xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = fill), alpha = 0.3, color = "black", lty = "dashed") +
-  scale_fill_manual(values = c("#00AFBB", "#FC4E07")) +
   theme_report_facet()
 
 cusum_plot 
