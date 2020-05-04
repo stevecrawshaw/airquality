@@ -48,6 +48,7 @@ rect_df <- data.frame(xmin = c(as.Date("2020-03-16"), lockdown_start_date), xmax
   mutate(fill = fct_reorder(as_factor(fill), xmin))
 
 update <- FALSE #is the analysis updating with new data?
+#update is used later to set whether data retrieved from online or local data used for speed
 
 # chart_title_date_phrase <- paste0("for period between")
 source(here::here("gg_themes.r")) # custom themes for ggplots
@@ -56,7 +57,7 @@ source(here::here("gg_themes.r")) # custom themes for ggplots
 ```{r Download and process continuous, eval = TRUE, include = FALSE}
 #--------------------------------CONTINUOUS DATA ODS ---------------------------
 if(update){
-source("S:\\SUSTAIN\\EnvQual\\Air_Quality\\Projects\\R Projects\\ODS\\importODS.r")
+source(here::here("importODS.r"))
 aq_data_DT <- importODSAQ(
     siteid = "all",
     pollutant = c("pm10", "no2", "nox", "no", "o3", "pm25"),
@@ -85,11 +86,11 @@ aq_monitors <- fread("https://opendata.bristol.gov.uk/explore/dataset/air-qualit
 
 } else {
 
-load(file = here::here("data", "covid", "dfs.RData")) #all the data needed for the analysis
+load(file = here::here("dfs.RData")) #all the data needed for the analysis
 }
 
 pm10_am_url <- "https://opendata.bristol.gov.uk/api/v2/catalog/datasets/air-quality-data-continuous/aggregates?select=avg(pm10)%20as%20mean_pm10&group_by=year(date_time)%2C%20siteid&where=date_time%3E%3D'2018'%20AND%20date_time%3C%3D'2018'"
-#get annual mean PM10 data from ODS and use later in text
+#get annual mean PM10 data from ODS using API V2 and use later in text
 pm10_am_data <- pm10_am_url %>% 
   GET() %>% 
   content(as = "text") %>% 
@@ -111,7 +112,7 @@ lockdown_long <- aq_data_DT %>%
   pivot_longer(cols = pm10:pm2.5, names_to = "Pollutant", values_to = "Concentration") %>% 
   mutate(Pollutant = as.factor(toupper(Pollutant))) %>% 
   na.omit(cols = "Concentration") %>% 
-  mutate(ld_day = yday(date)+2 - lockdown_start_julian)
+  mutate(ld_day = yday(date) + 2 - lockdown_start_julian)
 
 lockdown <- lockdown_long %>% 
   mutate(Pollutant = as.factor(tolower(Pollutant))) %>%
