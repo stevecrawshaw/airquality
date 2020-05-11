@@ -27,7 +27,7 @@ importODSAQ <-
     # includeGeo <-  F
     # includeMet <-  F
     # siteid <- "all"
-    # pollutant = c("o3", "nox", "pm10")
+    # pollutant = c("no2", "o3", "pm10", "pm2.5")
     Sys.setenv(TZ = 'UTC')
     #--------------------------------SET URLS AND VARIABLES-------------------
     headurl_aq <-
@@ -56,7 +56,7 @@ importODSAQ <-
     if (as.Date(dateFrom) - as.Date(dateTo) >= 0) {
       stop("The end date precedes or is equal to the start date.")
     }
-    pollsites_url <- paste0("https://opendata.bristol.gov.uk/explore/dataset/air-quality-monitoring-sites/download/?format=csv&disjunctive.pollutants=true", paste0("&refine.pollutants=", toupper(pollutant), collapse =""), "&timezone=Europe/London&lang=en&use_labels_for_header=false&csv_separator=%3B")
+    pollsites_url <- paste0("https://opendata.bristol.gov.uk/explore/dataset/air-quality-monitoring-sites/download/?format=csv&disjunctive.pollutants=true", paste0("&refine.pollutants=", toupper(pollutant), collapse =""), "&refine.instrumenttype=Continuous+(Reference)&timezone=Europe/London&lang=en&use_labels_for_header=false&csv_separator=%3B")
     
     pollsites <- fread(pollsites_url, select = "siteid")
     #download a vector of the siteid's offering the selected pollutants
