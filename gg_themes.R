@@ -40,6 +40,7 @@ Sys.setenv(TZ = "Etc/GMT-0")
 theme_report_facet <- function () { 
     theme_bw(base_size=12) %+replace% 
         theme(
+            plot.title = element_text(size = 18, face = "bold", margin = margin(0,0,15,0), hjust = 0.5),
             panel.background  = element_blank(),
             plot.background = element_rect(fill="white", colour = NA), 
             legend.background = element_rect(fill="transparent", colour=NA),

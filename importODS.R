@@ -3,87 +3,32 @@ importODSAQ <-
            siteid = c("203", "215", "463", "270", "500", "501"),
            dateFrom = "2018-01-01",
            dateTo = "2018-01-02",
-           includeGeo = FALSE,
-           includeMet = FALSE) {
-    #function to easily import continuous air quality data from the opendatasoft
-    #portal, using similar syntax to that used in openair functions, e.g. importAURN
+           includeGeo = FALSE) {
     
-    #Returns a sorted, keyed, data.table either with met data or without depending on status of includeMet.
-    #includeGeo determines whether or not the geo_point_2d field is returned which can be helpful for e.g. mapping
-    
-    #only returns sites where a requested pollutant is measured, i.e. requesting o3 for siteid = all will not return NOx only sites
-    
-    # checks for invalid arguments as far as practicable!
-    
-    #----------------------------LOAD \ INSTALL LIBRARIES IF NEEDED----------------
-    wants <- c("stringr", "data.table", "assertive", "fasttime")
+    #---------------------------------VARIABLES-----------------------------
+    wants <- c("tidyverse", "httr", "jsonlite")
     has   <- wants %in% rownames(installed.packages())
     if (any(!has))
       install.packages(wants[!has])
     lapply(wants, library, character.only = T)
-    #set variables for function testing
-    # dateFrom  <-  "2019-12-01"
-    # dateTo <-  "2019-12-02"
-    # includeGeo <-  F
-    # includeMet <-  F
-    # siteid <- "all"
-    # pollutant = c("no2", "o3", "pm10", "pm2.5")
-    Sys.setenv(TZ = 'UTC')
-    #--------------------------------SET URLS AND VARIABLES-------------------
-    headurl_aq <-
-      "https://opendata.bristol.gov.uk/explore/dataset/air-quality-data-continuous/download/?format=csv&disjunctive.location=true&q="
-    
-    dt_query_url <- "&q=date_time:%5B"
-    tailurl = "%5D&timezone=GMT&use_labels_for_header=false&csv_separator=%3B"
-    dateFrom_url <- paste0(dateFrom, "T00:00:00Z")
-    dateTo_url <- paste0(dateTo, "T23:59:59Z")
-    to_url <- "+TO+"
-    
+    dateFrom <- "2020-01-01"
+    dateTo <- "2020-01-02"
     dates <- c(dateFrom, dateTo)
+    #pollutant <- "all"
+    #-------------------------------------TEST VARIABLES-----------------------
+    #pollutant <- "all"
+    #pollutant <- c("no2", "PM10", "NOx")
+    #siteid = "all"
+    #siteid = "203"
+    # pollutant <-  "nox"
+    # siteid <- c("203", "215", "270")
+    # includeGeo <-  T
+    #--------------------------------ASSERT VALID DATA------------------------
+    #pollutant names
+    pollutant <- tolower(str_replace(pollutant, "[.]", "")) #make nice for the ODS
     
-    #---------CHECKING ARGUMENTS WITH PACKAGE ASSERTIVE-----------------
+    #any(pollutant == "no2")
     
-    assert_all_are_date_strings(dates, format = "%Y-%m-%d") # are they dates?
-    
-    if (any(as.Date(dates) > Sys.Date())) {
-      stop("dateFrom and dateTo cannot be in the future")
-    }# are they in the past?
-    
-    if (!is_logical(c(includeGeo, includeMet))) {
-      stop("includeGeo and includeMet must be TRUE or FALSE") #CHECK LOGICAL VARIABLES ARE
-    }
-    
-    if (as.Date(dateFrom) - as.Date(dateTo) >= 0) {
-      stop("The end date precedes or is equal to the start date.")
-    }
-    pollsites_url <- paste0("https://opendata.bristol.gov.uk/explore/dataset/air-quality-monitoring-sites/download/?format=csv&disjunctive.pollutants=true", paste0("&refine.pollutants=", toupper(pollutant), collapse =""), "&refine.instrumenttype=Continuous+(Reference)&timezone=Europe/London&lang=en&use_labels_for_header=false&csv_separator=%3B")
-    
-    pollsites <- fread(pollsites_url, select = "siteid")
-    #download a vector of the siteid's offering the selected pollutants
-    #from air-quality-monitoring-sites
-    if (siteid != "all") {
-      #siteids are selected - coerce to integer
-      site_id <- as.integer(siteid)
-      assert_is_integer(site_id)
-      
-      #---------------RETRIEVE VECTOR OF SITEIDS FOR POLLUTANTS SELECTED AND CREATE FACET url PART
-      p_sites <- pollsites[siteid %in% site_id, siteid]
-      
-      # subset with the specified siteid and return as a vector
-      #and create an API filter for those sites
-      #to avoid D/L of sites where that pollutant isn't measured
-      
-    } else {
-      
-      p_sites <-  pollsites[, siteid]
-      #just select the sites where the pollutant is measured
-      
-    }
-    siteid_url <- paste("siteid%3D", p_sites, sep = "", collapse = "+OR+") 
-    #and make the url portion
-    #construct this part of the url by D\L subset of air-quality-monitoring-sites dataset and parsing to the filter conditions required by air-quality-data-continuous
-    
-    #--------------------DEFINING SELECT STRING FOR FREAD (POLLUTANTS)-------------------
     if (any(pollutant != "all")) { #pollutant specified
       pollnames <- #vector of valid pollutant names
         c(
@@ -103,92 +48,142 @@ importODSAQ <-
           "rh",
           "press"
         )
-      if (any(!(tolower(str_replace(
-        pollutant, "[.]", ""
-      )) %in% pollnames))) {
+      if (!any(pollutant %in% pollnames)) {
         stop(
           c(
             "You have entered or more invalid pollutant names. Possible values are: ",
-            paste0(pollnames, collapse = " ")
+            paste0(pollnames, collapse = " "), ". Please also review the schema: https://opendata.bristol.gov.uk/explore/dataset/air-quality-data-continuous/information/?disjunctive.location"
           )
         )
       } #if any pollutant arguments don't match field names from the air-quality-data-continuous dataset, stop the function
-      
-      if (includeGeo) {
-        geo = "geo_point_2d"
-        selectedCols <-
-          tolower(str_replace(
-            c("date_time", "siteid", "location", pollutant, geo),
-            "[.]",
-            ""
-          ))
-      } else{
-        selectedCols <-
-          tolower(str_replace(
-            c("date_time", "siteid", "location", pollutant),
-            "[.]",
-            ""
-          ))
-      }
-      
-    } else{
-      selectedCols <- ""
     }
-    #all pollutants are selected so no select string required for fread
-    #--------------------------READ THE AQ DATA-----------------------------
-    (aq_url <-
-       paste0(headurl_aq,
-              siteid_url,
-              dt_query_url,
-              dateFrom_url,
-              to_url,
-              dateTo_url,
-              tailurl))
-    #construct the url for the download csv
     
-    if (selectedCols[1] == "") {
-      #all pollutants
-      aq_data_DT <- fread(aq_url)
+    # DATES
+    #function to check whether dates are valid
+    is.convertible.to.date <- function(x) all(!is.na(as.Date(x, tz = 'UTC', format = '%Y-%m-%d')))
+    
+    if(!is.convertible.to.date(dates)){
+      stop("You have supplied a non - compliant date string: Should be in the format 2020-02-28")
+    }
+    
+    if (any(as.Date(dates) > Sys.Date())) {
+      stop("dateFrom and dateTo cannot be in the future")
+    }# are they in the past?
+    
+    if (!is_logical(includeGeo)) {
+      stop("includeGeo must be TRUE or FALSE") #CHECK LOGICAL VARIABLES ARE
+    }
+    
+    if (as.Date(dateFrom) - as.Date(dateTo) >= 0) {
+      stop("The end date precedes or is equal to the start date.")
+    }
+    # CREATE DATE QUERY PORTION OF ODS SQL STRING----------------
+    date_query_string <-
+      paste0("date_time IN ['",
+             dateFrom,
+             "T00:00:00' TO '",
+             dateTo,
+             "T23:59:00']")
+    #---------------------------------
+    if (includeGeo) {
+      geofield = "geo_point_2d"
     } else {
-      #selected pollutants
-      
-      aq_data_DT <- fread(aq_url, select = selectedCols) #payload
-      
+      geofield = ""
     }
-    aq_data_DT[, date := fastPOSIXct(date_time, "Etc/GMT-0")][, date_time := NULL]
-    if ("pm25" %in% names(aq_data_DT)) {
-      setnames(aq_data_DT, "pm25", "pm2.5")
+    #---------------------------------
+    
+    #--------function to get query string for all the sites measuring a vector of pollutants-------
+    #this uses the refine=key:value syntax in a list to specify the facets on which to filter
+    #this works with this dataset (air-quality-monitoring-sites)
+    #because the pollutants are in one field, but split by a processor in the #configuration of the dataset
+    site_polls <- function(pollutant) {
+      if (any(siteid == "all")) {
+        sel <- "siteid, pollutants"
+        rows <- 100
+        url <-
+          "https://opendata.bristol.gov.uk/api/v2/catalog/datasets/air-quality-monitoring-sites/records"
+        #just select continuous otherwise DT's are returned for NO2
+        listvec <-
+          c(paste0("pollutants:", toupper(pollutant)),
+            "instrumenttype:Continuous (Reference)")
+        lst <- as.list(listvec) #make a list for the refine section
+        names(lst) <- rep("refine", length(listvec)) #of the query list
+        qry_list_a <-
+          list(select = sel, rows = rows) # the base qry list
+        qry_add <- c(qry_list_a, lst) #append lists
+        raq <- GET(url = url, query = qry_add) #get response object
+        sites <- content(raq, as = "text") %>%
+          jsonlite::fromJSON() %>%
+          `[[`("records") %>%
+          `[[`("record") %>%
+          `[[`("fields") %>%
+          pull() #extract DF from JSON \ lists and pull vector of sites that measure the pollutant
+        (site_where_qry <-
+            paste0("siteid = ", sites, collapse = " OR ")) #return the sites as a ODS SQL query string
+      }
     }
     
-    #convert and rename date to POSIX
-    neworder = c("date", "siteid", "location")
-    #----------------------READ AND PROCESS MET DATA IF REQUIRED------------
+    #--------------------------------------------------------------------------------------
+    basefields <- "date_time as date, siteid, location, "
+    allpolls <-
+      "nox, no2, no, pm10, pm25, o3, co, so2, vpm10, nvpm10, vpm25, nvpm25, temp, rh, press, "
     
-    if (includeMet) {
-      headurl_met <-
-        "https://opendata.bristol.gov.uk/explore/dataset/met-data-bristol-lulsgate/download/?format=csv&q=date_time:%5B"
-      met_url <-  paste0(headurl_met, dateFrom_url, to_url, dateTo_url, tailurl)
-      met_DT <- fread(met_url,
-                      select = c("date_time", "ws", "wd", "temp", "rh"))[, lapply(.SD, mean, na.rm = T),
-                                                                         by = .(date = floor_date(fastPOSIXct(date_time), "hour")),
-                                                                         .SDcols = c("ws", "wd", "temp", "rh")]#timeaverage and process met data
-      
-      setcolorder(aq_data_DT[met_DT, on = "date"],
-                  neworder = neworder)#join met data to aqdata and reorder columns before returning
-      
-    } else{
-      setcolorder(aq_data_DT, neworder = neworder)
+    if (any(pollutant == "all")) {
+      select_str <-
+        paste0(basefields, allpolls, geofield, collapse = ", ")
+      #-------------------------------------------
+      if (any(siteid == "all")) {
+        #all siteids all pollutants
+        where_str <- date_query_string
+      } else {
+        #siteids specified.              all pollutants
+        where_str <-
+          paste0(date_query_string,
+                 " AND (",
+                 paste0("siteid=", siteid, collapse = " OR "),
+                 ")")
+      }
+      #--------------------------------------------
+    } else {
+      #pollutants specified
+      (polls <-  paste0(pollutant, collapse = ", "))
+      select_str <- paste0(basefields, polls, ", ", geofield)
+      #---------------------------------------
+      if (any(siteid == "all")) {
+        #pollutants specified     all sites
+        where_str <-
+          paste0(date_query_string, " AND (", site_polls(pollutant), ")")
+      } else {
+        #pollutants and siteids specified
+        where_str <-
+          paste0(date_query_string,
+                 " AND (",
+                 paste0("siteid=", siteid, collapse = " OR "),
+                 ")")
+      }
+      #------------------------------------------
     }
-    setkeyv(aq_data_DT, neworder)
+    #--------------------------DEFINE BASE URL AND QUERY STRING FOR API CALL-------------
+    base_url <-
+      "https://opendata.bristol.gov.uk/api/v2/catalog/datasets/air-quality-data-continuous/exports/csv"
+    qry_list <-
+      list(select = select_str,
+           where = where_str,
+           sort = "-date_time")
+    # GET the response object
+    r <- GET(url = base_url, query = qry_list)
+    
+    #retrieve the csv data from the response object and change names to be openair compliant
+    if (!http_error(r)) {
+      aqdata <- content(r, as = "text") %>%
+        read_delim(
+          na = "",
+          delim = ";",
+          col_types = list(siteid = col_integer())
+        ) 
+      names(aqdata) <- aqdata %>% 
+        names() %>% 
+        str_replace_all(pattern = "pm25", replacement = "pm2.5")
+    }
+    return(aqdata)
   }
-#function testing
-# DT <- importODSAQ(
-#   pollutant = c("o3", "nox", "co"),
-#   siteid = "all",
-#   dateFrom = "2018-01-01",
-#   dateTo = "2018-01-02"
-# )
-
-
-
-
