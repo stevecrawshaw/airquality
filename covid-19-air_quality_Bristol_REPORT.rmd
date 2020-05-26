@@ -111,7 +111,7 @@ aq_data_DT <- importODSAQ(
     pollutant = c("pm10", "no2", "nox", "no", "o3", "pm25"),
     dateFrom = dateFrom,
     dateTo = dateTo
-)
+) %>% setDT()
 
 #------------------------------EXTRACT AND PROCESS TRAFFIC DATA--------------------
 scoot_aq_sites <- fread(here::here("data", "scoot_aq.csv")) %>% setkey(LinkID) %>% 

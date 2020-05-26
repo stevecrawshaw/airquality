@@ -4,16 +4,16 @@ importODSAQ <-
            dateFrom = "2018-01-01",
            dateTo = "2018-01-02",
            includeGeo = FALSE) {
-    
+
     #---------------------------------VARIABLES-----------------------------
     wants <- c("tidyverse", "httr", "jsonlite")
     has   <- wants %in% rownames(installed.packages())
     if (any(!has))
       install.packages(wants[!has])
     lapply(wants, library, character.only = T)
-    dateFrom <- "2020-01-01"
-    dateTo <- "2020-01-02"
-    dates <- c(dateFrom, dateTo)
+    # dateFrom <- "2020-01-01"
+    # dateTo <- "2020-01-02"
+    
     #pollutant <- "all"
     #-------------------------------------TEST VARIABLES-----------------------
     #pollutant <- "all"
@@ -21,16 +21,20 @@ importODSAQ <-
     #siteid = "all"
     #siteid = "203"
     # pollutant <-  "nox"
-    # siteid <- c("203", "215", "270")
-    # includeGeo <-  T
+    #  siteid <- c("203", "215", "270")
+    # includeGeo <-  F
+    #siteid = "all"
+    # pollutant = "all" #c("pm10", "no2", "nox", "no", "o3", "pm25")
+    # dateFrom = "2020-01-01"
+    # dateTo = "2020-01-02"
+    
     #--------------------------------ASSERT VALID DATA------------------------
+    dates <- c(dateFrom, dateTo)
     #pollutant names
     pollutant <- tolower(str_replace(pollutant, "[.]", "")) #make nice for the ODS
     
     #any(pollutant == "no2")
-    
-    if (any(pollutant != "all")) { #pollutant specified
-      pollnames <- #vector of valid pollutant names
+     pollnames <- #vector of valid pollutant names
         c(
           "nox",
           "no2",
@@ -48,6 +52,8 @@ importODSAQ <-
           "rh",
           "press"
         )
+    if (any(pollutant != "all")) { #pollutant specified
+     
       if (!any(pollutant %in% pollnames)) {
         stop(
           c(
@@ -84,15 +90,8 @@ importODSAQ <-
              "T00:00:00' TO '",
              dateTo,
              "T23:59:00']")
-    #---------------------------------
-    if (includeGeo) {
-      geofield = "geo_point_2d"
-    } else {
-      geofield = ""
-    }
-    #---------------------------------
-    
-    #--------function to get query string for all the sites measuring a vector of pollutants-------
+
+        #--------function to get query string for all the sites measuring a vector of pollutants-------
     #this uses the refine=key:value syntax in a list to specify the facets on which to filter
     #this works with this dataset (air-quality-monitoring-sites)
     #because the pollutants are in one field, but split by a processor in the #configuration of the dataset
@@ -124,13 +123,20 @@ importODSAQ <-
     }
     
     #--------------------------------------------------------------------------------------
-    basefields <- "date_time as date, siteid, location, "
-    allpolls <-
-      "nox, no2, no, pm10, pm25, o3, co, so2, vpm10, nvpm10, vpm25, nvpm25, temp, rh, press, "
+    basefields <- "date_time as date, siteid, location"
+    
+    if(!includeGeo){
+      (allpolls <- paste0(pollnames, collapse = ", "))
+      (polls <-  paste0(pollutant, collapse = ", "))
+    } else {
+          (allpolls <- paste(paste0(pollnames, collapse = ", "), "geo_point_2d", sep = ", "))
+          (polls <-  paste(paste0(pollutant, collapse = ", "), "geo_point_2d", sep = ", "))
+        } 
+    
     
     if (any(pollutant == "all")) {
-      select_str <-
-        paste0(basefields, allpolls, geofield, collapse = ", ")
+      (select_str <-
+        paste(basefields, allpolls, sep = ", "))
       #-------------------------------------------
       if (any(siteid == "all")) {
         #all siteids all pollutants
@@ -146,8 +152,8 @@ importODSAQ <-
       #--------------------------------------------
     } else {
       #pollutants specified
-      (polls <-  paste0(pollutant, collapse = ", "))
-      select_str <- paste0(basefields, polls, ", ", geofield)
+      
+      (select_str <- paste(basefields, polls, sep = ", "))
       #---------------------------------------
       if (any(siteid == "all")) {
         #pollutants specified     all sites
@@ -181,9 +187,19 @@ importODSAQ <-
           delim = ";",
           col_types = list(siteid = col_integer())
         ) 
-      names(aqdata) <- aqdata %>% 
-        names() %>% 
+      names(aqdata) <- aqdata %>%
+        names() %>%
         str_replace_all(pattern = "pm25", replacement = "pm2.5")
+      return(aqdata)
+    } else {
+      return(FALSE)
     }
-    return(aqdata)
+    
   }
+
+aq_data <- importODSAQ(
+  siteid = "all",
+  pollutant = c("pm10", "no2", "nox", "no", "o3", "pm25"),
+  dateFrom = "2020-01-01",
+  dateTo = "2020-01-02"
+)
