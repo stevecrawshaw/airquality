@@ -197,9 +197,9 @@ importODSAQ <-
     
   }
 
-aq_data <- importODSAQ(
-  siteid = "all",
-  pollutant = c("pm10", "no2", "nox", "no", "o3", "pm25"),
-  dateFrom = "2020-01-01",
-  dateTo = "2020-01-02"
-)
+# aq_data <- importODSAQ(
+#   siteid = "all",
+#   pollutant = c("pm10", "no2", "nox", "no", "o3", "pm25"),
+#   dateFrom = "2020-01-01",
+#   dateTo = "2020-01-02"
+# )
