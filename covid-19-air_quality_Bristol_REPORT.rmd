@@ -13,8 +13,8 @@ This brief report summarises the air quality impact of the lockdown policy on ai
 ```{r Load library, eval = TRUE, include = FALSE}
 #-----------------------------------LIBRARIES-----------------------------------
 #rmarkdown::render(here::here("covid-19-air_quality_Bristol_REPORT.rmd"))
-#run document - objects into global env.
-wants <- c("tidyverse", "data.table", "DT", "openair", "here", "lubridate", "deweather", "httr", "jsonlite", "ggeasy", "zoo", "DBI", "dbplyr", "sf", "config", "patchwork")
+#run document - objects into global env. RUN FROM CONSOLE
+wants <- c("tidyverse", "data.table", "DT", "openair", "here", "lubridate", "deweather", "httr", "jsonlite", "ggeasy", "zoo", "DBI", "dbplyr", "sf", "config", "patchwork", "gganimate", "gifski")
 has   <- wants %in% rownames(installed.packages())
 if(any(!has)) install.packages(wants[!has])
 lapply(wants, library, character.only=T)
@@ -23,6 +23,7 @@ lapply(wants, library, character.only=T)
 
 ```{r Set variables, eval = TRUE, include = FALSE}
 #---------------------------------VARIABLES-------------------------------------
+apikey = "9ead54a2d8a6781f3169d53bd94d99d10b6b9ff932b8a1b9852da434"
 Sys.setenv(TZ = "Etc/GMT-0")
 dateFrom = "2017-12-31" # for analysis of raw data
 rawdata_startDate_chr <- "2018-12-31"
@@ -31,7 +32,7 @@ studyStartDate_chr <- "2020-03-01"
 studyStartDate <- as.Date(studyStartDate_chr)
 studyStartDate_julian = yday(studyStartDate)
 dateFrom_dw <- "2020-01-01" #start of deweather analysis period
-dateTo = "2020-05-31" #final day of lockdown period (or latest date for monitoring data)
+dateTo = "2020-06-30" #final day of lockdown period (or latest date for monitoring data)
 lockdown_start_date_chr <- "2020-03-24" #announced 23/03/2020
 startDate_2020 <- as.Date(dateFrom_dw)
 startdate <- as.Date(dateFrom)
@@ -61,9 +62,9 @@ update <- FALSE #is the analysis updating with new data?
 # chart_title_date_phrase <- paste0("for period between")
 source(here::here("gg_themes.r")) # custom themes for ggplots
 #----------------------------WARDS BOUNDARIES MAP--------------------------------------
-wards <- read_sf("https://opendata.bristol.gov.uk/explore/dataset/wards/download/?format=geojson&timezone=Europe/London")
-
-boundary <- read_sf("https://opendata.bristol.gov.uk/explore/dataset/bristol/download/?format=geojson&timezone=Europe/London&lang=en")
+# wards <- read_sf("https://opendata.bristol.gov.uk/explore/dataset/wards/download/?format=geojson&timezone=Europe/London")
+# 
+# boundary <- read_sf("https://opendata.bristol.gov.uk/explore/dataset/bristol/download/?format=geojson&timezone=Europe/London&lang=en")
 ```
 
 ```{r Download and process continuous, eval = TRUE, include = FALSE}
@@ -77,56 +78,25 @@ monthly_tubes <- dbReadTable(con, "qry_raw_monthly_no2_locs")
 con %>% 
     dbDisconnect() %>% 
     rm()
-#-------get lat long for DT's--------
-select = c("siteid", "geo_point_2d", "tube_kerb_distance_m")
-dt_locs <- fread("https://opendata.bristol.gov.uk/explore/dataset/air-quality-monitoring-sites/download/?format=csv&disjunctive.pollutants=true&refine.pollutants=NO2&refine.instrumenttype=Diffusion+Tube&timezone=Europe/London&lang=en&use_labels_for_header=false&csv_separator=%3B", select = select) %>% 
-  separate(col = geo_point_2d, into = c("lat", "long"), sep = ",") %>% 
-  mutate_if(is.character, as.numeric)
+#-------get lat long for DT's--------removed as DT not mapped in later versions
+# select = c("siteid", "geo_point_2d", "tube_kerb_distance_m")
+# dt_locs <- fread("https://opendata.bristol.gov.uk/explore/dataset/air-quality-monitoring-sites/download/?format=csv&disjunctive.pollutants=true&refine.pollutants=NO2&refine.instrumenttype=Diffusion+Tube&timezone=Europe/London&lang=en&use_labels_for_header=false&csv_separator=%3B", select = select) %>% 
+#   separate(col = geo_point_2d, into = c("lat", "long"), sep = ",") %>% 
+#   mutate_if(is.character, as.numeric)
 
 #--------------------------CONTINUOUS DATA AURN--------------------------------
-(core_urb_traff_sites <- c("birr", "br11", "gla4", "led6", "nca3", "nwbv", "shbr", "shlw", "burw"))
-#-----------------------WORKAROUND CODE FOR importAURN FAILURE
-aurn_sitenames <- importMeta() %>% 
-  filter(code %in% toupper(core_urb_traff_sites)) %>% 
-  select(site, code) %>% 
-  mutate(code = tolower(code))
+core_urb_traff_sites <- c("birr", "br11", "gla4", "led6", "nca3", "nwbv", "shbr", "shlw", "burw")
 
-#"https://uk-air.defra.gov.uk/assets/downloads/21983774620.csv"
-colnames_aurn <- c("date", "time", fread(here::here("data", "colnames_aurn.csv")) %>% pull())
-
-nullcols <- seq(from = 4, to = 44, by = 2) #take out the status fields
-  
-aurn_raw <- fread(here::here("data", "21983774620.csv"), skip = "Date", fill = T, header = TRUE, sep = ",", na.strings = "No data", colClasses = list(NULL = nullcols)) %>% 
-  setnames(colnames_aurn) %>% 
-  mutate(date = as_datetime(paste0(date, "T", time))) %>% 
-  select(-time) %>% 
-  mutate(across(.cols = starts_with("pm"), .fns = as.numeric)) %>% 
-  pivot_longer(cols = -date, values_to = "concentration") %>%
-  separate(name, into = c("pollutant", "code"), sep = "_") %>% 
-  inner_join(aurn_sitenames, by = c("code" = "code"))
-  
-
-core_means_joined  <- aurn_raw %>% 
-  filter(between(yday(date), lockdown_start_julian, lockdown_end_julian)) %>% 
-  group_by(site, code, year = year(date), pollutant) %>% 
-  summarise(mean_concentration = mean(concentration, na.rm = T)) %>% 
+core_means_joined <- importAURN(site = core_urb_traff_sites, year = 2017:2020, pollutant = "all") %>%
+  filter(between(yday(date), lockdown_start_julian, lockdown_end_julian)) %>%
+      group_by(site, code, year = year(date)) %>%
+  summarise(no2 = mean(no2, na.rm = T),
+            pm10 = mean(pm10, na.rm = T),
+            pm2.5 = mean(pm2.5, na.rm = T)) %>%
   ungroup() %>%
-  mutate(site = factor(ifelse(code == "burw", "Manchester", as.character(site))),
-         site = factor(ifelse(code == "shlw", "Liverpool", as.character(site))),
-         City = gsub('([A-z]+) .*', '\\1', site)) %>%  #extract all before space
-pivot_wider(id_cols = c("site", "code", "year", "City"), names_from = pollutant, values_from = mean_concentration)
-#---------------USE CODE BELOW WHEN importAURN WORKS---------------
-
-# core_means_joined <- importAURN(site = "brs8", year = 2017, pollutant = "no2") %>% 
-#   filter(between(yday(date), lockdown_start_julian, lockdown_end_julian)) #%>%
-#       group_by(site, code, year = year(date)) %>%
-#   summarise(no2 = mean(no2, na.rm = T),
-#             pm10 = mean(pm10, na.rm = T),
-#             pm2.5 = mean(pm2.5, na.rm = T)) %>%
-#   ungroup() %>%
-#   mutate(site = factor(ifelse(code == "BURW", "Manchester", as.character(site))),
-#          site = factor(ifelse(code == "SHLW", "Liverpool", as.character(site))),
-#          City := gsub('([A-z]+) .*', '\\1', site)) #extract all before space
+  mutate(site = factor(ifelse(code == "BURW", "Manchester", as.character(site))),
+         site = factor(ifelse(code == "SHLW", "Liverpool", as.character(site))),
+         City := gsub('([A-z]+) .*', '\\1', site)) #extract all before space
 #----------------------------------MET DATA------------------------------
 colnames <- c("date_time", "ws", "wd", "temp")
 met_data_DT <- fread(paste0("https://opendata.bristol.gov.uk/explore/dataset/met-data-bristol-lulsgate/download/?format=csv&q=date_time:%5B", rawdata_startDate_chr, "T00:00:00Z+TO+", dateTo, "T22:59:59Z%5D&timezone=UTC&lang=en&use_labels_for_header=false&csv_separator=%3B"), select = colnames)
@@ -146,30 +116,62 @@ aq_data_DT <- importODSAQ(
 ) %>% setDT()
 
 #------------------------------EXTRACT AND PROCESS TRAFFIC DATA--------------------
-scoot_aq_sites <- fread(here::here("data", "scoot_aq.csv")) %>% setkey(LinkID) %>% 
-  .[aq_monitors, on = c("siteid" = "siteid"), nomatch = 0]
 
-tw <- config::get(file = "S:\\SUSTAIN\\EnvQual\\Air_Quality\\Projects\\R Projects\\air_quality_data_management\\config.yml", config = "TrafficWarehouse")# get credentials via config.yml file for security
-#integral security in dsn failed to work
-#https://db.rstudio.com/best-practices/managing-credentials
+scoot_aq_sites <- read_csv(paste0("S:\\SUSTAIN\\EnvQual\\Air_Quality\\Projects\\R Projects\\airquality_GIT\\data\\scoot_aq.csv"), col_types = cols(LinkID = col_character(), siteid = col_integer(), sk_dim_countdeviceid = col_character(),   sk_dim_journeylinkid = col_character()))
 
-con <- dbConnect(odbc::odbc(),
-                 Driver = tw$TrafficWarehouse$driver,
-                 Server = tw$TrafficWarehouse$server,
-                 Database = tw$TrafficWarehouse$database,
-                 UID = tw$TrafficWarehouse$uid,
-                PWD = tw$TrafficWarehouse$pwd)
-#SQL to get mean speed and total flow data by hour with link ids and names
-query <- paste0("SELECT LinkName, LinkID, DATEADD(HOUR, DATEDIFF(HOUR, 0, CalculationTime), 0) AS date, AVG(AvergageSpeed) AS mean_speed, SUM(CurrentFlow) AS total_flow FROM Warehouse.ScootLinkTravelTime WHERE (CalculationTime > CAST('", studyStartDate_chr, "' AS DATE)) GROUP BY LinkID, LinkName, DATEADD(HOUR, DATEDIFF(HOUR, 0, CalculationTime), 0);")
+#----------COUNT DATA
 
-scoot <-  con %>% DBI::dbGetQuery(statement = query) %>% setDT() %>% setkey(LinkID, date)
-saveRDS(scoot, here::here("data", "scoot.rds"))# ~many records - needed for TV
-#process data for TV plot
-aq_sites_scoot <- scoot_aq_sites[scoot, on = c("LinkID" = "LinkID"), nomatch = 0][, `:=`(lockdown = fifelse(date < lockdown_start_date, "pre - lockdown", "lockdown"))]
+count_sitestring <- paste0("sk_dim_countdeviceid = ", pull(scoot_aq_sites, sk_dim_countdeviceid), collapse = " OR ")
 
-scoot_daily <- scoot[date > studyStartDate, .(daily_mean_speed = mean(mean_speed, na.rm = T), daily_total_flow = sum(total_flow, na.rm = T)), by = .(date_day = floor_date(date, unit = "day"))]
+select_str_tc <- "sk_dim_countdeviceid, countsitefullname, SUM(hourlyflow) as flow"
+groupby_str_tc <-  "sk_dim_countdeviceid, countsitefullname, date_format(rollupdatetime, 'YYYY-MM-dd') as date"
+where_str_tc <- paste0("rollupdatetime IN ['2019-01-01T00:00:00' TO '", dateTo, "T00:00:00'] AND (", count_sitestring, ")")
+base_url_tc <- "https://opendata.bristol.gov.uk/api/v2/catalog/datasets/fact-traffic-counts/aggregates/"
 
-dbDisconnect(con)
+qry_list_tc <- list(select = select_str_tc, group_by = groupby_str_tc, where = where_str_tc, apikey = apikey)# apikey is in the query rather than in an authenticate argument
+#retrieve the response object
+r_tc <- GET(url = base_url_tc, query = qry_list_tc)
+
+count_data <- content(r_tc, as="text") %>% 
+    fromJSON() %>% 
+    `[[`("aggregations") %>% 
+    inner_join(scoot_aq_sites, by = "sk_dim_countdeviceid") %>% 
+    group_by(siteid, site, date) %>% 
+    summarise(sum_daily_flow = sum(flow)) #%>% 
+    # summarise(aadt = mean(sum_daily_flow, na.rm = T), .groups = "drop")
+
+    
+journey_sitestring <- paste0("sk_dim_journeylinkid = ", unique(pull(scoot_aq_sites, sk_dim_journeylinkid)), collapse = " OR ")
+
+select_str_jl <- "sk_dim_journeylinkid, AVG(weightedavgspeed) as avg_speed, AVG(weightedjt) as avg_jt, journeylinkdescription"
+group_by_str_jl <- "sk_dim_journeylinkid, journeylinkdescription ,date_format(rollupdatetime, 'YYYY-MM-dd') as date"
+where_str_jl <- paste0("rollupdatetime IN ['2019-01-01T00:00:00' TO '", dateTo, "T00:00:00'] AND (", journey_sitestring, ")")
+base_url_jl <- "https://opendata.bristol.gov.uk/api/v2/catalog/datasets/fact-journey-hourly/aggregates/"
+
+qry_list_jl <- list(select = select_str_jl, group_by = group_by_str_jl, where = where_str_jl, apikey = apikey)# apikey is in the query rather than in an authenticate argument
+
+r_jl <- GET(url = base_url_jl, query = qry_list_jl)
+
+
+journey_link_data <- content(r_jl, as="text") %>% 
+    fromJSON() %>% 
+    `[[`("aggregations") %>% 
+    inner_join(scoot_aq_sites, by = "sk_dim_journeylinkid") %>% 
+    group_by(siteid, site, date) %>% 
+    summarise(mean_speed = mean(avg_speed, na.rm = T))
+# mean_jt = mean(avg_jt, na.rm = T), .groups = "drop") 
+
+counts_speeds <- count_data %>% 
+  left_join(journey_link_data, by = c("siteid" = "siteid", "date" = "date")) %>%
+  mutate(date = ymd(date)) %>%
+  filter(date > as.Date("2020-02-15")) %>% 
+  select(-site.y) %>% 
+  rename(Site = site.x, Date = date) %>% 
+  pivot_longer(cols = sum_daily_flow:mean_speed, names_to = "parameter") %>% 
+  mutate(parameter = ifelse(parameter == "mean_speed", "Speed (mph)", "Daily Flow (vehicles)")) %>% 
+  filter(!is.na(value))
+
+
 
 #---------------------------------------------------------------------------------
 
@@ -180,48 +182,52 @@ load(file = here::here("dfs.RData")) #all the data needed for the analysis
 
 #--------------------------------TUBE DATA PLOTTING-------------------------
 tubes_for_map <- monthly_tubes %>% 
-  filter(month == 4) %>%
+  filter(month == 4 | month == 5) %>%
   add_count(siteid) %>%
-  filter(n == 10) %>% 
+  filter(n >= 10) %>% 
   group_by(year)
 
-monthly_tube_plot <- tubes_for_map %>% 
+monthly_tube_plot <- tubes_for_map %>%
+  mutate(monthname = month.abb[month]) %>% 
   ggplot(aes(x = as.factor(year), y = concentration, group = year)) +
   geom_boxplot(fill = "bisque", lwd = 1) +
   # geom_jitter(width = 0.2, alpha = 0.4) +
-  labs(x = "Year", y = quickText("NO2 ugm-3"), title = quickText("Mean monthly NO2 for diffusion tubes in April: 2011 - 2020"), caption = "Unbiased, raw data, not for comparison with annual objectives") +
+  labs(x = "Year", y = quickText("NO2 ugm-3"), title = quickText("Mean monthly NO2 for diffusion tubes 2011 - 2020"), caption = "Unbiased, raw data, not for comparison with annual objectives") +
+  facet_grid(rows = vars(monthname)) +
   theme_ppt_single() +
   theme(panel.grid = element_blank())
 
-medians <- ggplot_build(monthly_tube_plot)$data[[1]]$middle # use data computed for boxplot later in text
-names(medians) <- as.character(2011:2020)
+#stuff below is for tubes
+
+# medians <- ggplot_build(monthly_tube_plot)$data[[1]]$middle # use data computed for boxplot later in text
+# names(medians) <- as.character(2011:2020)
 
 #-----------------------process data for mapping tubes---------------------------
-previous9 <- 2011:2019
-
-map_tubes <- tubes_for_map %>%
-  ungroup() %>% 
-  mutate(comp_group = as.factor(ifelse(year %in% previous9, "previous", "current"))) %>%
-  select(siteid, concentration, comp_group) %>% 
-  group_by(siteid, comp_group) %>% 
-  summarise(no2 = mean(concentration, na.rm = T)) %>% 
-  pivot_wider(id_cols = siteid, names_from = comp_group, values_from = no2) %>% 
-  mutate(change = round(((current / previous) - 1) * 100)) %>%
-  inner_join(dt_locs, by = c("siteid" = "siteid"))
-
-tube_change_map <- map_tubes %>% 
-  ggplot() +
-  geom_sf(data = boundary, lwd = 2, fill = "white") +
-  geom_sf(data = wards, fill = "white") +
-  geom_point(aes(x = long, y = lat, fill = change), size = 6, shape = 21) +
-  scale_fill_stepsn(colours = terrain.colors(5)) +
-  theme_bw() +
-  theme(axis.text = element_blank(),
-        legend.title = element_text(size = 14),
-        legend.text = element_text(size = 12),
-        panel.grid = element_blank(),
-        axis.ticks = element_blank()) +
-  labs(x = NULL, y = NULL, fill = "% change from \n mean of \n previous Aprils", title = quickText("Changes in monthly mean NO2 concentrations at diffusion tube sites"), subtitle = "April 2020 compared with mean of 9 previous Aprils", caption = "Uncorrected monthly data") 
+# previous9 <- 2011:2019
+# 
+# map_tubes <- tubes_for_map %>%
+#   ungroup() %>% 
+#   mutate(comp_group = as.factor(ifelse(year %in% previous9, "previous", "current"))) %>%
+#   select(siteid, concentration, comp_group) %>% 
+#   group_by(siteid, comp_group) %>% 
+#   summarise(no2 = mean(concentration, na.rm = T)) %>% 
+#   pivot_wider(id_cols = siteid, names_from = comp_group, values_from = no2) %>% 
+#   mutate(change = round(((current / previous) - 1) * 100)) %>%
+#   inner_join(dt_locs, by = c("siteid" = "siteid"))
+# 
+# tube_change_map <- map_tubes %>% 
+#   ggplot() +
+#   geom_sf(data = boundary, lwd = 2, fill = "white") +
+#   geom_sf(data = wards, fill = "white") +
+#   geom_point(aes(x = long, y = lat, fill = change), size = 6, shape = 21) +
+#   scale_fill_stepsn(colours = terrain.colors(5)) +
+#   theme_bw() +
+#   theme(axis.text = element_blank(),
+#         legend.title = element_text(size = 14),
+#         legend.text = element_text(size = 12),
+#         panel.grid = element_blank(),
+#         axis.ticks = element_blank()) +
+#   labs(x = NULL, y = NULL, fill = "% change from \n mean of \n previous Aprils", title = quickText("Changes in monthly mean NO2 concentrations at diffusion tube sites"), subtitle = "April 2020 compared with mean of 9 previous Aprils", caption = "Uncorrected monthly data") 
 
 #-------------------------------------PM10 SOURCE APP CALCS_---------------
 
@@ -268,12 +274,7 @@ met_data_DT_hr <- met_data_DT %>%
 #----------------------------------AURN--------------------------
 
 
-#-------------------------GOOGLE TRAFFIC DATA----------------------
-mob_url <- "https://opendata.bristol.gov.uk/explore/dataset/google_mobility_data/download/?format=csv&timezone=Europe/London&lang=en&use_labels_for_header=true&csv_separator=%3B"
 
-google_mob_data <- mob_url %>% 
-  fread(colClasses = c("Date", "character", "integer")) %>% 
-setnames(c("date", "Sector", "pc_change_baseline"))
 
 #-----------------------DE WEATHER WRANGLING------------------------------
 #hour average met data, join to AQ data , join to aq_monitors
@@ -342,7 +343,7 @@ models_plots_sites <- aq_met_dw_hourly %>%
     labs(title = quickText(paste0("De - weathered concentrations of ", pollutant, ": ", site)))),
     filename = paste0(site, "_", pollutant, "_", ".png"))
 
-save(aq_data_DT, met_data_DT, aq_monitors, core_means_joined, models_plots, models_plots_sites, monthly_tubes, wards, dt_locs, scoot_daily, aq_sites_scoot, file = here::here("dfs.RData"))
+save(aq_data_DT, met_data_DT, aq_monitors, core_means_joined, models_plots, models_plots_sites, monthly_tubes, wards, counts_speeds, file = here::here("dfs.RData"))
 
 }
 
@@ -375,6 +376,8 @@ dwp_site_data <- models_plots_sites %>%
          pollutant = toupper(pollutant)) %>% 
   filter(!is.na(delta_binned)) 
 
+saveRDS(dwp_site_data, file = here::here("data", "dwp_site_data.rds"))
+
 #tabulate summary stats for the deweathered data pre and post lockdown
 dwp_sum_stats <- dwp_site_data %>%
   mutate(lockdown = if_else(date >= lockdown_start_date, "lockdown", "pre - lockdown")) %>% 
@@ -400,6 +403,15 @@ dwp_plot_site <- dwp_site_data %>%
         axis.text.y = element_text(face = "bold"),
         axis.text.x = element_text(face = "bold"))
 
+dwp_bar_plot <- dwp_site_data %>% #Weekly Bar Plot
+timeAverage(avg.time = "week", type = c("site", "pollutant")) %>%
+  ggplot(aes(x = date, y = pred, fill = pollutant)) +
+  geom_col() +
+  facet_wrap(~ site) +
+  scale_fill_manual(values = c("firebrick", "dodgerblue")) +
+  theme_report_facet() +
+  labs(x = "Date: 2020", y = quickText("Weekly mean concentrations:  ugm-3"), title = quickText("Weekly de - weathered NOx and NO2"), fill = "Pollutant")
+ 
 #and plot
 dwp_plot <- deweathered_predictions %>% 
   ungroup() %>% 
@@ -412,7 +424,7 @@ dwp_plot <- deweathered_predictions %>%
   scale_fill_manual(values = c("#00AFBB", "#FC4E07")) +
   geom_line(lwd = 2) +
   scale_color_brewer(palette = "Dark2") +
-  labs(title = "Daily mean de - weathered predictions of pollutant concentrations", subtitle = "Bristol: 2020", caption = "Operational issues at city centre site: April 9th to April 16th", fill = "Period", y = quickText("Predicted concentration ( ugm-3 )"), x = "Date") +
+  labs(title = "Daily mean de - weathered predictions", subtitle = "Bristol: 2020", caption = "Operational issues at city centre site: April 9th to April 16th", fill = "Period", y = quickText("Predicted concentration ( ugm-3 )"), x = "Date") +
   facet_grid(pollutant ~ ., scales = "free_y") +
   theme_report_facet() +
   easy_plot_legend_size(size = 14) +
@@ -420,36 +432,38 @@ dwp_plot <- deweathered_predictions %>%
   theme(strip.text.y = element_text(color = "black", face = "bold", size = 14, angle = 0))
 #-----------------------------CUSUM WRANGLING------------------------------------
 
-cusum_plot_data <- 
-  aq_data_DT %>% 
-  select(date, code = siteid, site = location, nox) %>% 
-  timeAverage(avg.time = "day", type = c("code", "site")) %>%
-    ungroup() %>% # to get a daily mean - seems adequate
-    mutate(year = as.integer(format(date, "%Y")),
-           yday = yday(date) + 2018 - year) %>% #shift julian date by one to ensure delta is
-    select(-code, -date) %>%                    #like from like, ie monday from monday
-    filter(between(yday, studyStartDate_julian, lockdown_end_julian),#study period
-           site != "Colston Avenue") %>% #started nov 2018
-    pivot_wider(id_cols = c("site", "yday"), names_from = year, values_from = nox, names_prefix = "nox_") %>%
-  mutate(d = nox_2020 - rowMeans(select(., nox_2018, nox_2019), na.rm = T)) %>% #needs to be befor grouping
-    group_by(site) %>% 
-    mutate(delta = ifelse(is.na(d), zoo::na.locf(d), d)) %>% # replace NA with the last valid datapoint in group
-            mutate(cumsum_delta = cumsum(delta), #here's the magic
-           date = as.Date("2019-12-31") + yday) #recreate a date column for plotting
+#cusum calcs dodgy - need modelled counterfactual
 
-cusum_plot <- cusum_plot_data %>% 
-    ggplot(aes(x = date, y = cumsum_delta)) +
- geom_rect(data = rect_df, mapping = aes(x = NULL, y = NULL, xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = fill), alpha = 0.3, color = "black", lty = "dashed") +
-  scale_fill_manual(values = c("#00AFBB", "#FC4E07")) +
-  geom_line(lwd = 2, color = "black") +
-    # geom_smooth(se = F, lwd = 1, color = "black", method = "loess", formula = 'y ~ x') +
-    facet_wrap( ~ site, scales = "free_y") +
-  labs(title = "Cumulative sum (cusum) chart of NOx at Bristol sites",
-       subtitle = "2020 data compared with mean daily concentrations in 2018 - 2019",
-       x = "Date:2020", y = "Cumulative sum of difference in daily NOx",
-       fill = "Period") +
-  theme_report_facet() +
-  theme(strip.text.x = element_text(face = "bold"))
+# cusum_plot_data <- 
+#   aq_data_DT %>% 
+#   select(date, code = siteid, site = location, nox) %>% 
+#   timeAverage(avg.time = "day", type = c("code", "site")) %>%
+#     ungroup() %>% # to get a daily mean - seems adequate
+#     mutate(year = as.integer(format(date, "%Y")),
+#            yday = yday(date) + 2018 - year) %>% #shift julian date by one to ensure delta is
+#     select(-code, -date) %>%                    #like from like, ie monday from monday
+#     filter(between(yday, studyStartDate_julian, lockdown_end_julian),#study period
+#            site != "Colston Avenue") %>% #started nov 2018
+#     pivot_wider(id_cols = c("site", "yday"), names_from = year, values_from = nox, names_prefix = "nox_") %>%
+#   mutate(d = nox_2020 - rowMeans(select(., nox_2018, nox_2019), na.rm = T)) %>% #needs to be befor grouping
+#     group_by(site) %>% 
+#     mutate(delta = ifelse(is.na(d), zoo::na.locf(d), d)) %>% # replace NA with the last valid datapoint in group
+#             mutate(cumsum_delta = cumsum(delta), #here's the magic
+#            date = as.Date("2019-12-31") + yday) #recreate a date column for plotting
+# 
+# cusum_plot <- cusum_plot_data %>% 
+#     ggplot(aes(x = date, y = cumsum_delta)) +
+#  geom_rect(data = rect_df, mapping = aes(x = NULL, y = NULL, xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = fill), alpha = 0.3, color = "black", lty = "dashed") +
+#   scale_fill_manual(values = c("#00AFBB", "#FC4E07")) +
+#   geom_line(lwd = 2, color = "black") +
+#     # geom_smooth(se = F, lwd = 1, color = "black", method = "loess", formula = 'y ~ x') +
+#     facet_wrap( ~ site, scales = "free_y") +
+#   labs(title = "Cumulative sum (cusum) chart of NOx at Bristol sites",
+#        subtitle = "2020 data compared with mean daily concentrations in 2018 - 2019",
+#        x = "Date:2020", y = "Cumulative sum of difference in daily NOx",
+#        fill = "Period") +
+#   theme_report_facet() +
+#   theme(strip.text.x = element_text(face = "bold"))
 ```
 
 ```{r summary calcs, eval = TRUE, include = FALSE}
@@ -473,7 +487,7 @@ mean_pollutant_table <- lockdown_long %>%
   pivot_wider(id_cols = Pollutant, names_from = year, values_from = mean_conc) %>% 
   calc_pc_change() %>% setDT()
 
-#fwrite(mean_pollutant_table, here::here("data", "mean_pollutant_table.csv"))
+fwrite(mean_pollutant_table, here::here("data", "mean_pollutant_table.csv"))
 
 changeno2 <- mean_pollutant_table[Pollutant == "NO2", `% Change`] #for use in the text
 changenox <- mean_pollutant_table[Pollutant == "NOX", `% Change`]
@@ -484,11 +498,9 @@ changepm10 <- mean_pollutant_table[Pollutant == "PM10", `% Change`]
 ## Introduction
 This report summarises changes to ambient air quality, represented by concentrations of regulated pollutants, that have occurred during the COVID-19 lockdown period. Bristol City Council continued to monitor air quality throughout lockdown as this work was classed by the government as an essential activity.
 
-Traffic levels declined rapidly from slightly before lockdown leading to a clear reduction in emissions of key pollutants. This is shown for roadside and background sites
+Traffic levels declined rapidly from slightly before lockdown leading to a clear reduction in emissions of key pollutants. This is apparent for roadside and background sites.
 
 The changes in air quality characterised by comparisons of raw data between two periods cannot be solely attributed to the lockdown measures, because weather and other variables strongly influence ambient air quality. In order to account for the influence of weather and other covariates, a statistical modelling approach has been adopted which can remove the effect of the weather and identify the changes in concentrations which would arise if meteorological conditions and temporal effects are held constant. This approach can be used to ascribe the changes in air quality to lockdown measures with more certainty than simply by comparing raw data between two periods.
-
-In addition to the de - weathering of data, techniques used in statistical process control control have also been used to show the change from the "normal" air quality situation.
 
 ## Summary of changes
 The comparison of raw data between 2019 and 2020 was for the period `r ldstart_2019` to `r ldend_2019` and `r lockdown_start_date` to `r lockdown_end_date`.
@@ -501,93 +513,55 @@ Measures of particulate matter (PM) - PM~10~ and PM~2.5~ also fell but the reduc
 
 Ozone (O~3~) rose when compared to the baseline period. This is expected because as NOx declines, less ozone is chemically reduced in the photochemical reaction between these two species and hence concentrations of ozone may rise.
 
-Data from the [NO~2~ diffusion tube network](https://opendata.bristol.gov.uk/explore/dataset/no2-diffusion-tube-data/map/?disjunctive.location&refine.year=2018&location=12,51.46856,-2.60587&basemap=jawg.streets), which gives greater spatial coverage than the continuous network has been analysed and the distribution of these changes in measured nitrogen dioxide for the complete month of April is shown in the report.
+Data from the [NO~2~ diffusion tube network](https://opendata.bristol.gov.uk/explore/dataset/no2-diffusion-tube-data/map/?disjunctive.location&refine.year=2018&location=12,51.46856,-2.60587&basemap=jawg.streets), which gives greater spatial coverage than the continuous network has been analysed. The changes in measured nitrogen dioxide for the months of April and May are shown.
 
 All of Bristol's air quality data are available through our [open data portal.](https://opendata.bristol.gov.uk/pages/air-quality-dashboard-new/map#air-quality-now)
 
 
 ## Traffic
-Traffic flows started to decline when the first measures were announced on the 16th March. By the time full lockdown was operating (from 24th March), traffic flows had declined by more than 50% compared to normal levels. Data are from BCC's Urban Traffic Control (UTC) system and are for all SCOOT counters. These are normally induction loops that are embedded in the road surface.
+Traffic flows started to decline when the first measures were announced on the 16th March. By the time full lockdown was operating (from 24th March), traffic flows had declined by more than 50% compared to normal levels. Data are from BCC's Urban Traffic Control (UTC) system and represent smoothed daily mean speeds and total flows at routes or counters close to the continuous air quality monitoring sites.
 
 It can be seen that traffic flows began to climb slowly again after the first week in April.
 
-```{r Traffic flows, eval = TRUE, echo = FALSE, results = "show", out.width = '100%', fig.width = 14, fig.height = 12, fig.cap = "Fig 1. Daily traffic flows: 2020"}
-#knitr::include_graphics(here::here("plots", "traffic_covid_ppt.png"))
-
-#reproduce powerBI chart for daily traffic flows
-traffic_daily_plot <- scoot_daily %>%
-  ggplot(aes(x = date_day, y = daily_total_flow)) +
-  geom_col(fill = "grey27") +
-  labs(x = "Date", y = "Daily vehicle flow", title = "Daily traffic flows: All SCOOT counters") +
-   theme_ppt_single() +
- lockdown_shading(rect_df = rdf_P) +
-  theme(axis.text.y = element_blank(),
-        legend.key.size = unit(1.5, "cm"),
-  legend.key.width = unit(1.5, "cm"),
-  legend.text = element_text(size = 14)) +
-  labs(fill = "Period")
-
-traffic_daily_plot
-
-```
+```{r Traffic flows, eval = TRUE, echo = FALSE, results = "show", out.width = '100%', fig.width = 14, fig.height = 12, message = FALSE, warnings = FALSE, fig.cap = "Fig 1. Daily traffic flows and speeds: 2020"}
 
 
-```{r Traffic flows time variation hide, eval = TRUE, echo = FALSE, results = "hide", out.width = '100%', fig.show = "hide"}
-
-aq_sites_scoot[, `:=`(weekday = wday(date, label = T), hour = hour(date))]
-
-day_flow_data <- aq_sites_scoot[, .(total_daily_flow = sum(total_flow, na.rm = T),  weekday), by = .(day_date = as.Date(date), lockdown, location)][,.(mean_daily_flow = mean(total_daily_flow, na.rm = T)), by = .(weekday, lockdown, location)]
-
-day_flow_plot <- ggplot(day_flow_data, aes(x = weekday, y = mean_daily_flow, group = location, color = location)) +
-  geom_line(lwd = 1) +
-  facet_wrap( ~ lockdown)+
-  labs(y = "Mean Daily Flow") +
+speed_flow_plot <- counts_speeds %>% 
+  ggplot(aes(x = Date, y = value, color = Site)) +
+  geom_smooth(method = "loess", se = F, lwd = 2) +
+  facet_wrap(~ parameter, scales = "free_y") +
+  theme_report_facet() +
   scale_color_brewer(palette = "Dark2") +
-  theme_bw() +
-  theme(strip.text.x = element_text(face = "bold")) +
-  theme(legend.position = "none")
+  labs(title = "Daily vehicle flows and mean speed at air quality monitoring sites", y = "Value")
 
-day_flow_plot
-
-
-
-hour_flow_plot <- aq_sites_scoot[, .(mean_hourly_flow = mean(total_flow)), by = .(hour, location, lockdown)] %>%  
-  ggplot(aes(x = hour, y = mean_hourly_flow, color = location)) +
-  geom_line(lwd = 1) +
-  facet_wrap( ~ lockdown)+
-  labs(y = "Mean Hourly Flow", color = "Site") +
-  scale_color_brewer(palette = "Dark2") +
-  theme_bw() +
-  theme(strip.text.x = element_text(face = "bold")) 
-
-hour_flow_plot
-
-```
-
-The time variation of traffic flows drives the variation in measured concentrations of traffic pollutants, especially NOx, which is closely coupled to exhaust emissions. The chart below summarises traffic data from before and during the lockdown. The count sites selected were those close to the air quality monitoring sites.
-
-```{r Traffic flows time variation show, eval = TRUE, echo = FALSE, results = "show", fig.align = "default", fig.hide = "show", out.width = '100%', fig.cap = "Fig 2. Time variation of traffic: before and during lockdown"}
-
-day_flow_plot / hour_flow_plot +
-  plot_annotation(title = "Time variation of traffic: before and during lockdown") +
-  plot_layout(guides = "collect")
+speed_flow_plot
 
 ```
 
 Google and Apple are providing access to their mobility data during the COVID-19 lockdown. The chart below shows smoothed trends in [mobility by sector for Bristol from Google's dataset](https://opendata.bristol.gov.uk/explore/dataset/google_mobility_data/information/). The baseline for comparison is the median value, for the corresponding day of the week, during the 5-week period Jan 3 – Feb 6, 2020. The initial reduction in mobility for all sectors except residential is apparent. In this context the residential category includes deliveries to homes. There does seem to be a slight increase after the first week in April of non residential sector mobility and from mid - May there was a steep increase in mobility associated with use of parks.
 
-```{r Traffic flows by sector, eval = TRUE, echo = FALSE, results = "show", out.width = '100%', fig.width = 14, fig.height = 12, fig.cap = "Fig 3. Traffic flows by sector: 2020"}
+```{r Traffic flows by sector, eval = TRUE, echo = FALSE, results = "show", out.width = '100%', fig.width = 14, fig.height = 12, message = FALSE, warnings = FALSE, fig.cap = "Fig 2. Traffic flows by sector: 2020"}
+
+#-------------------------GOOGLE TRAFFIC DATA----------------------
+google_mob_data <- fread("https://www.gstatic.com/covid19/mobility/Global_Mobility_Report.csv") %>%
+    filter(sub_region_1 == "Bristol City")
+
 sector_mobility_plot <- google_mob_data %>%
-    mutate(Sector = str_to_title(str_replace_all(Sector, "and", "&"))) %>% 
+    select(date:last_col()) %>% 
+    pivot_longer(-date, names_to = "sector", values_to = "pc_change_baseline") %>%
+    mutate(date = as.Date(date)) %>% 
+    separate(sector, into = c("Sector", "percent"), sep = "_percent_") %>% 
+    select(-percent) %>% 
+    mutate(Sector = str_to_title(str_replace_all(Sector, c("_" = " ", "and" = "&")))) %>% 
     ggplot(aes(x = date, y = pc_change_baseline, color = Sector)) +
-    geom_smooth(se = F, lwd = 2, method = "loess", formula = 'y ~ x') +
+    geom_smooth(se = F, lwd = 2) +
     geom_vline(xintercept = as.Date("2020-03-24"), lty = 5) +
-    labs(y = "% change from baseline",
+   labs(y = "% change from baseline",
          x = "Date",
         title = "Changes in mobility by sector",
         caption = paste0("Google COVID-19 Community Mobility Reports. \n      https://www.google.com/covid19/mobility/ Accessed: ", Sys.Date())) +
   scale_color_brewer(palette = "Dark2") +
-     theme_ppt_single() +
+ theme_ppt_single() +
   theme( legend.title = element_text(size = 14),
         legend.text = element_text(size = 12))
 
@@ -599,7 +573,8 @@ sector_mobility_plot
 
 ## Summary of changes by pollutant
 
-The table below shows the percentage changes in each pollutant aggregated by site between the two lockdown periods. Bristol City Council's data are ratified according to processes detailed with our [annual status reports](https://www.bristol.gov.uk/documents/20182/32675/Bristol+City+Council+2019+Air+Quality+Annual+Status+Report+ASR.pdf/62eeb142-ac59-ac08-148b-a1247e08b1db). Data from the national network sites (Bristol St. Pauls and Bristol Temple Way) are not fully ratified.
+The table below shows the percentage changes in each pollutant aggregated by site between the two lockdown periods. 
+Bristol City Council's data are ratified according to processes detailed with our [annual status reports](https://www.bristol.gov.uk/documents/20182/32675/Bristol+City+Council+2019+Air+Quality+Annual+Status+Report+ASR.pdf/62eeb142-ac59-ac08-148b-a1247e08b1db). Data from the national network sites (Bristol St. Pauls and Bristol Temple Way) are not fully ratified at the time of writing.
 
 ```{r generate mean pollutant table, eval = TRUE, echo = FALSE, results = "show", out.width = '100%', fig.width = 14, fig.height = 12, fig.cap = "Table 1. Average change in pollutant concentrations in ugm-3"}
 
@@ -608,9 +583,7 @@ mean_pollutant_table %>%
               options = list(dom = 't')) # just the table
 ```
 
-
 The table below shows the mean percentage reductions by site and pollutant. Not all sites measure all pollutants.
-
 
 ```{r generate mean site table, eval = TRUE, echo = FALSE, out.width = '100%', fig.width = 14, fig.height = 12, fig.cap = "Table 2. Average change in pollutant concentrations by site and pollutant (ugm-3)"}
 mean_site_table %>% 
@@ -620,7 +593,7 @@ mean_site_table %>%
 ```
 
 
-```{r aq map, eval = TRUE, echo = FALSE, out.width = '100%', fig.width = 14, fig.height = 12, fig.cap = "Fig 4. Locations of current continuous monitoring sites"}
+```{r aq map, eval = TRUE, echo = FALSE, out.width = '100%', fig.width = 14, fig.height = 12, fig.cap = "Fig 3. Locations of current continuous monitoring sites"}
 knitr::include_url("https://opendata.bristol.gov.uk/explore/embed/dataset/air-quality-monitoring-sites/map/?disjunctive.pollutants&refine.current=True&refine.instrumenttype=Continuous%20(Reference)&location=12,51.45296,-2.57009&basemap=jawg.streets&static=false&datasetcard=true&scrollWheelZoom=false", height = "500px")
 #embed the map of live sites from ODS
 ```
@@ -631,7 +604,7 @@ The changes in Bristol can be shown in context with other core cities by using d
 
 It is not possible to infer much meaning from the relative differences in changes between cities as there are a range of site - specific factors that could influence this, but the data are presented to show the national context.
 
-```{r data viz National, eval = TRUE, echo = FALSE, warning = FALSE, results = "show", fig.height = 7, fig.width = 11, fig.cap = "Fig 5. National comparison: nitrogen dioxide"}
+```{r data viz National, eval = TRUE, echo = FALSE, warning = FALSE, results = "show", fig.height = 7, fig.width = 11, fig.cap = "Fig 4. National comparison: nitrogen dioxide"}
 #--------------------------------------CORE CITIES-------------------------
 city_plot_covid_by_year <- core_means_joined %>% 
   filter(!is.na(no2)) %>% 
@@ -655,7 +628,7 @@ city_plot_covid_by_year
 
 Bristol's city centre site at [Colston Avenue](https://opendata.bristol.gov.uk/pages/aqcontinuoussites/?q=siteid:501) is the most polluted roadside site on the network and so is an interesting example of the reductions during the lockdown. The chart below shows weekly mean concentrations of NOx, NO~2~ and PM~10~ for the baseline and lockdown period. Operational issues between 9th April and 15th April mean that data is incomplete for this period.
 
-```{r data viz Colston, eval = TRUE, echo = FALSE, warning = FALSE, results = "show", fig.height = 7, fig.width = 11, fig.cap = "Fig 6. Chart of Colston Avenue site by pollutant"}
+```{r data viz Colston, eval = TRUE, echo = FALSE, warning = FALSE, results = "show", fig.height = 7, fig.width = 11, fig.cap = "Fig 5. Chart of Colston Avenue site by pollutant"}
 #plot bar chart of means by day, all sites except colston
 sites_weekly <- lockdown_long %>% 
   filter(Pollutant %in% c("NOX", "NO2", "PM10")) %>%
@@ -670,7 +643,7 @@ colston <- sites_weekly %>%
     geom_col(position = "dodge") + 
     scale_y_continuous(quickText("ug m-3")) +
     labs(x = "Date", title = "Changes in weekly mean concentrations by year in lockdown periods: Colston Avenue", caption = "Operational issues 9th April to 16th April 2020") + 
-scale_color_brewer(palette = "Dark2") +
+scale_fill_manual(values = c("#D95F02", "#1B9E77", "#7570B3")) +
          facet_wrap(~ as.factor(year), scales = "free_x") 
 
 colston +
@@ -679,13 +652,14 @@ colston +
 
 Other sites on the network show similar patterns. For the [Wells Road](https://opendata.bristol.gov.uk/pages/aqcontinuoussites/?q=siteid:270) site, the difference in concentrations between the two periods was not as pronounced as for Colston Avenue.
 
-```{r data viz Bristol sites, eval = TRUE, echo = FALSE, warning = FALSE, results = "show", fig.height = 7, fig.width = 11, fig.cap = "Fig 7. NOx and NO2: Wells Road"}
+```{r data viz Bristol sites, eval = TRUE, echo = FALSE, warning = FALSE, results = "show", fig.height = 7, fig.width = 11, fig.cap = "Fig 6. NOx and NO2: Wells Road"}
 siteplot <- sites_weekly %>% 
    filter(siteid == 270) %>%
   ggplot(aes(x = as.Date(date), y = Concentration, fill = Pollutant)) +
     geom_col(position = "dodge") +
     scale_y_continuous(quickText("ug m-3")) +
-    labs(x = "Date", title = "Changes in weekly mean concentrations in lockdown periods: Wells Road") + scale_color_brewer(palette = "Dark2") +
+    labs(x = "Date", title = "Changes in weekly mean concentrations in lockdown periods: Wells Road") +
+  scale_fill_manual(values = c("#D95F02", "#1B9E77")) +
      facet_wrap(~ as.factor(year), scales = "free_x") 
 
 siteplot +
@@ -694,18 +668,15 @@ siteplot +
 ```
 
 ## Changes in nitrogen dioxide at diffusion tube sites
-Diffusion tubes are used to monitor nirogen dioxide over a period of a month or so. nitrogen dioxide is diffused into a metal grid and the tubes are sent for analysis in a laboratory. Diffusion tubes are placed according to a monthly calendar specified by Defra and BCC's diffusion tubes are exposed according to this calendar. April 2020 was the first complete month where tubes were entirely exposed under the lockdown measures and it is therefore interesting to compare April 2020 with Aprils in previous years.
+Diffusion tubes are used to monitor ambient nitrogen dioxide. Nitrogen dioxide from the air diffuses into a metal grid in the tube and the tubes are sent for analysis in a laboratory. Diffusion tubes are placed according to a monthly calendar specified by Defra and BCC's diffusion tubes are exposed according to this calendar. April 2020 was the first complete month where tubes were entirely exposed under the lockdown measures.
 
-The boxplot below shows that there was a significant reduction in concentrations at sites where data was available for all the years analysed when April 2020 is compared to other years. The median value for 2020 was `r round(medians["2020"])` ugm^-3^ which was `r round((medians["2020"] / min(medians[1:9])) * 100)`% of the previous lowest median April value from `r names(which.min(medians[1:9]))`. 
+The boxplot below shows that there was a significant reduction in concentrations at sites where data was available for all the years analysed when April and May 2020 is compared to those months in other years. 
 
-```{r data viz diffusion tubes, eval = TRUE, echo = FALSE, warning = FALSE, results = "show", fig.height = 7, fig.width = 11, fig.cap = "Fig 8. mean concentrations of NO2 in April diffusion tubes by year"}
+```{r data viz diffusion tubes, eval = TRUE, echo = FALSE, warning = FALSE, results = "show", fig.height = 7, fig.width = 11, fig.cap = "Fig 7. mean concentrations of NO2 in April diffusion tubes by year"}
+
+ # The median value for 2020 was `r round(medians["2020"])` ugm^-3^ which was `r round((medians["2020"] / min(medians[1:9])) * 100)`% of the previous lowest median April value from `r names(which.min(medians[1:9]))`
+
 monthly_tube_plot
-```
-There are over 100 diffusion tubes in the city, mostly located at anticipated or known polluted locations. The spatial distribution of the measured changes can be mapped as shown below. It appears that there has been greater reductions in the north of the city than in the south, but further analysis is needed to confirm this and identify possible reasons.
-
-```{r data viz diffusion tube map, eval = TRUE, echo = FALSE, warning = FALSE, results = "show", fig.height = 7, fig.width = 11, fig.cap = "Fig 9. change in mean concentrations in April 2020 compared with April mean of previous 9 years"}
-tube_change_map
-
 ```
 
 ## Time variation
@@ -713,17 +684,14 @@ tube_change_map
 Analysis of the time variation of NOx shows a significant reduction at all hours of the day when compared to the same period in 2019. Again, while this cannot be be attributed solely to the lockdown measures, it is likely that traffic reductions arising from lockdown play a significant role.
 
 ```{r data viz timeVariation NOx  hide, eval = TRUE, echo = FALSE, results = "show", fig.show = "hide" }
-
 tv_nox <- timeVariation(lockdown_roadside, pollutant = "nox", type = "year", group = "location", ylab = "ugm-3", ci = F, lwd = 4, cols = openColours(scheme = "Dark2"))
-
-
 ```
-```{r data viz timeVariation NOx show, eval = TRUE, echo = FALSE, results = "show", fig.height = 7, fig.width = 11, fig.cap = "Fig 10. Time variation of NOx at roadside sites in lockdown period by hour"}
+```{r data viz timeVariation NOx show, eval = TRUE, echo = FALSE, results = "show", fig.height = 7, fig.width = 11, fig.cap = "Fig 8. Time variation of NOx at roadside sites in lockdown period by hour"}
 plot(tv_nox, subset = "hour")
 ```
 
 A similar reduction is shown when plotted by day of the week.
-```{r data viz timeVariation NOx show day, eval = TRUE, echo = FALSE, results = "show", fig.height = 7, fig.width = 11, fig.cap = "Fig 11. Time variation of NOx at roadside sites in lockdown period by day"}
+```{r data viz timeVariation NOx show day, eval = TRUE, echo = FALSE, results = "show", fig.height = 7, fig.width = 11, fig.cap = "Fig 9. Time variation of NOx at roadside sites in lockdown period by day"}
 plot(tv_nox, subset = "day")
 ```
 
@@ -733,7 +701,7 @@ For NO~2~ the reduction is less than for NOx, because NO~2~ is not directly prop
 tv_no2 <- timeVariation(lockdown_roadside, pollutant = "no2", type = "year", group = "location", ylab = "ugm-3", lwd = 3, ci = F, cols = openColours(scheme = "Dark2"))
 ```
 
-```{r data viz timeVariation NO2 show, eval = TRUE, echo = FALSE, results = "show", , fig.height = 7, fig.width = 11, fig.cap = "Fig 12. Time variation of NO2 at roadside sites in lockdown period by hour"}
+```{r data viz timeVariation NO2 show, eval = TRUE, echo = FALSE, results = "show", , fig.height = 7, fig.width = 11, fig.cap = "Fig 10. Time variation of NO2 at roadside sites in lockdown period by hour"}
 plot(tv_no2, subset = "hour")
 ```
 
@@ -744,15 +712,15 @@ As explained earlier, PM~10~ reductions are not as significant as NOx or NO~2~ b
 tv_pm10 <- timeVariation(filter(lockdown, !is.na(pm10)), pollutant = "pm10", type = "year", group = "location",  ylab = "ugm-3", lwd = 3, ci = F, cols = openColours(scheme = "Dark2"))
 ```
 
-```{r data viz timeVariation PM10 show, eval = TRUE, echo = FALSE, results = "show", fig.height = 7, fig.width = 11, fig.cap = "Fig 13. Time variation of PM10 in lockdown period by hour"}
+```{r data viz timeVariation PM10 show, eval = TRUE, echo = FALSE, results = "show", fig.height = 7, fig.width = 11, fig.cap = "Fig 11. Time variation of PM10 in lockdown period by hour"}
 plot(tv_pm10, subset = "hour")
 ```
 
 ## Accounting for Meteorology
 
-Analysis of the wind speed and direction from [Bristol Lulsgate](https://opendata.bristol.gov.uk/explore/dataset/met-data-bristol-lulsgate/information/) show that although wind speeds from the NE quadrant were higher in the 2020 lockdown period than in the baseline period in 2019, it is unlikely that this can explain all of the dramatic reduction shown as the wind from the dominant direction for this period will be somewhat polluted by other urban upwind emissions. Further de - weathering analysis is required to establish this with more certainty and is summarised in the following section.
+Analysis of the wind speed and direction from [Bristol Lulsgate](https://opendata.bristol.gov.uk/explore/dataset/met-data-bristol-lulsgate/information/) show that although wind speeds from the NE quadrant were higher in the 2020 lockdown period than in the baseline period in 2019, it is unlikely that this can explain all of the dramatic reduction shown, as the wind from the dominant direction for this period will be somewhat polluted by other urban upwind emissions. Further de - weathering analysis is required to establish this with more certainty and is summarised in the following section.
 
-```{r data viz Meteorology, eval = TRUE, echo = FALSE, warning = FALSE, results = "show", fig.height = 7, fig.width = 10, fig.cap = "Fig 14. Wind roses for lockdown periods: Bristol Lulsgate"}
+```{r data viz Meteorology, eval = TRUE, echo = FALSE, warning = FALSE, results = "show", fig.height = 7, fig.width = 10, fig.cap = "Fig 12. Wind roses for lockdown periods: Bristol Lulsgate"}
 met_data_DT_hr %>% 
   filter(between(yday(date), lockdown_start_julian, lockdown_end_julian)) %>% 
   windRose(ws = "ws", wd = "wd", type = "year", main = "Wind roses for COVID-19 lockdown periods: 2019 and 2020")
@@ -763,7 +731,7 @@ The deweather functions of the [openair package](https://cran.r-project.org/web/
 
 Predictions of daily mean concentrations are derived from the modelled hourly means of data that are aggregated by site type. The accepted classifications of "Urban Background" (distant from busy road) and "Urban Traffic" (close to busy road) were used, as well as a classification of "City Centre" to cover the most polluted site, Colston Avenue, as this site represents the most polluted air in the city. Sites with a data capture less than 90% are not used in the analysis. The table below shows the classes for each of the sites analysed.
 
-```{r table sites, eval = TRUE, echo = FALSE, warning = FALSE, message = FALSE, results = "show", fig.height = 7, fig.width = 15, fig.cap = "Table 3. Sites aggregated for model analysis"}
+```{r table sites, eval = TRUE, echo = FALSE, warning = FALSE, message = FALSE, results = "show", fig.height = 7, fig.width = 13, fig.cap = "Table 3. Sites aggregated for model analysis"}
 
 classtable <-   aq_met_dw_hourly %>% 
     select(site, dw_group) %>% 
@@ -787,15 +755,15 @@ For NOx, a similar reduction was seen at the city centre site after the 16th Apr
 
 PM~10~ concentrations did decline in the immediate post - lockdown period but then rose steeply during the pollution episode over Easter weekend. The boosted regression tree models used in the de - weathering process take into account wind speed and direction but cannot account for elevated pollutant levels in the incoming air and hence are unable to remove the effect of regional pollution episodes such as the one that occurred at this time.
 
-```{r deweather chart, eval = TRUE, echo = FALSE, warning = FALSE, message = FALSE, results = "show", fig.height = 7, fig.width = 10, fig.show = "show", fig.cap = "Fig 15. Deweathered chart by site class"}
+```{r deweather chart, eval = TRUE, echo = FALSE, warning = FALSE, message = FALSE, results = "show", fig.height = 7, fig.width = 14, fig.show = "show", fig.cap = "Fig 15. Deweathered chart by site class"}
 
 dwp_plot 
 
 ```
 
-The de - weathering process can also be applied to individual sites. The chart below shows how the de-weathered daily predictions vary from the mean levels for traffic pollutants for 2020 for each site. It is clear that from the date of lockdown, significant reductions have ocurred at all sites for NOx and NO~2~ and that these reductions are not primarily driven by weather.
+The de - weathering process can also be applied to individual sites. The chart below shows how the de-weathered daily predictions vary from the mean levels for traffic pollutants for 2020 for each site. It is clear that from the date of lockdown, significant reductions have ocurred at all sites for NOx and NO~2~ and that these reductions are not primarily driven by weather. It can be seen that deweathered concentrations start to rise from mid June.
 
-```{r deweathered predictions of NOx and NO2 by site, eval = TRUE, echo = FALSE, warning = FALSE, message = FALSE, results = "show", fig.height = 7, fig.width = 10, fig.show = "show", fig.cap = "Fig 16. Deweathered chart by site: NOx and NO2"}
+```{r deweathered predictions of NOx and NO2 by site, eval = TRUE, echo = FALSE, warning = FALSE, message = FALSE, results = "show", fig.height = 7, fig.width = 10, fig.show = "show", fig.cap = "Fig 15. Deweathered chart by site: NOx and NO2"}
 #find the means of NOx and NO2 by site for 2020 for comparison with delta
 dwp_plot_site
 
@@ -805,18 +773,53 @@ The predicted changes in the deweathered NOx and NO~2~ concentrations are summar
 
 ```{r deweathered predictions of NOx and NO2 by site summary stats, eval = TRUE, echo = FALSE, warning = FALSE, message = FALSE, results = "show", fig.height = 7, fig.width = 10, fig.show = "show", fig.cap = "Table 4. Summary statistics for de - weathered NOx and NO2 concentrations"}
 
-
 datatable(dwp_sum_stats, rownames = F,
-              options = list(dom = 't'))
+              options = list(dom = 't'),
+          colnames = c("Site", "NO2 Change %", "NOx Change %"))
 ```
 
+Plotting the weekly mean concentrations of the traffic pollutants NOx and NO~2~ shows the effect of lockdown rules on weekly concentrations by controlling for the effect of the weather. It can be seen from the plot below that concentrations remained low throughout May despite some evidence that traffic levels are climbing since mid April. There is some evidence of rising concentrations towards the end of June, particularly at Colston Avenue.
+
+```{r deweathered weekly NOx and NO2 by site, eval = TRUE, echo = FALSE, warning = FALSE, message = FALSE, results = "show", fig.height = 7, fig.width = 10, fig.show = "show", fig.cap = "Fig. 16. Predicted weekly mean NOx and NO2: De - weathered predictions"}
+
+dwp_bar_plot
+```
+
+
+```{r cusum analysis, eval = TRUE, echo = FALSE, warning = FALSE, message = FALSE, results = "hide", fig.height = 7, fig.width = 10, , fig.show = "hide", fig.cap = "Fig 17. Animated de - weathered NOx data"}
+
+# dwp_plot <- dwp_site_data %>% 
+#   mutate(yday = yday(date)) %>%
+#   filter(pollutant == "NOX") %>% 
+#   ggplot(aes(x = date, y = pred, colour = site)) +
+#   geom_point(size = 5) +
+#   scale_color_brewer(palette = "Dark2") +
+#   labs(x = "Date",
+#        y = "Predicted NOx",
+#        colour = "Site",
+#        title = "    De - weathered NOx at continuous analyser sites") +
+#     theme_ppt_single() +
+#   theme(plot.title = element_text(hjust = 0.5))
+# 
+# #dwp_plot
+# 
+# dwp_plot_animate <- dwp_plot +
+#   transition_time(yday) +
+#   shadow_wake(wake_length = 0.4)
+# 
+# #dwp_plot_animate  
+# 
+# animate(dwp_plot_animate, height = 500, width = 800, fps = 30, duration = 20, end_pause = 60, res = 100)
+# 
+# dwp_plot_animate
+#cusum_plot
+#removed as unsound
+
+
 ## Cumulative Sum (cusum) analysis of traffic pollutants
-Cusum charts were plotted for sites measuring NOx during March 2020. Cusum charts are used in statistical process control to indicate where a change occurs in a measured variable. In this instance, the difference in daily mean measured concentrations of NOx between the day in 2020 and the mean of the daily values in 2018 and 2019 is plotted. The day is adjusted so that the weekdays are identical to account for the different diurnal variation by weekday.
-
-It can be seen that all sites showed a declining trace from the beginning of March. This is inline with the national picture of declining concentrations of NOx under "business as usual" because of improving engine technology. However, all sites also show an inflection of the trace around the time of the period between the social distancing edict and lockdown proper. There is some evidence that the cusum trace is levelling off towards the end of the analysis period, which is to be expected, as traffic flows stabilise at a minimum or even start to increase.
-
-```{r cusum analysis, eval = TRUE, echo = FALSE, warning = FALSE, message = FALSE, results = "hide", fig.height = 7, fig.width = 10, , fig.show = "show", fig.cap = "Fig 17. Cusum chart of NOx data"}
-cusum_plot
+# Cusum charts were plotted for sites measuring NOx during March 2020. Cusum charts are used in statistical process control to indicate where a change occurs in a measured variable. In this instance, the difference in daily mean measured concentrations of NOx between the day in 2020 and the mean of the daily values in 2018 and 2019 is plotted. The day is adjusted so that the weekdays are identical to account for the different diurnal variation by weekday.
+# 
+# It can be seen that all sites showed a declining trace from the beginning of March. This is inline with the national picture of declining concentrations of NOx under "business as usual" because of improving engine technology. However, all sites also show an inflection of the trace around the time of the period between the social distancing edict and lockdown proper. There is some evidence that the cusum trace is levelling off towards the end of the analysis period, which is to be expected, as traffic flows stabilise at a minimum or even start to increase.
 ```
 
 
