@@ -177,7 +177,7 @@ counts_speeds <- count_data %>%
 
 } else {
 
-load(file = here::here("dfs.RData")) #all the data needed for the analysis
+load(file = "S:/SUSTAIN/EnvQual/Air_Quality/Projects/R Projects/air_quality_data_management/data/dfs.RData") #all the data needed for the analysis
 }
 
 #--------------------------------TUBE DATA PLOTTING-------------------------
@@ -343,7 +343,7 @@ models_plots_sites <- aq_met_dw_hourly %>%
     labs(title = quickText(paste0("De - weathered concentrations of ", pollutant, ": ", site)))),
     filename = paste0(site, "_", pollutant, "_", ".png"))
 
-save(aq_data_DT, met_data_DT, aq_monitors, core_means_joined, models_plots, models_plots_sites, monthly_tubes, wards, counts_speeds, file = here::here("dfs.RData"))
+save(aq_data_DT, met_data_DT, aq_monitors, core_means_joined, models_plots, models_plots_sites, monthly_tubes, wards, counts_speeds, file = "S:/SUSTAIN/EnvQual/Air_Quality/Projects/R Projects/air_quality_data_management/data/dfs.RData")
 
 }
 
