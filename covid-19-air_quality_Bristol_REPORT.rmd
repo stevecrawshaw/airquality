@@ -56,7 +56,7 @@ lockdown_shading <- function(rect_df){
   geom_rect(data = rect_df, mapping = aes(x = NULL, y = NULL, xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = fill), alpha = 0.3, color = "black", lty = "dashed")
 }
 
-update <- FALSE #is the analysis updating with new data?
+update <- TRUE #is the analysis updating with new data?
 #update is used later to set whether data retrieved from online or local data used for speed
 
 # chart_title_date_phrase <- paste0("for period between")
@@ -116,6 +116,8 @@ aq_data_DT <- importODSAQ(
 ) %>% setDT()
 
 #------------------------------EXTRACT AND PROCESS TRAFFIC DATA--------------------
+#get traffic and journey speed data, join them to a table of the monitoring sites
+#group and calculate summary stats, plot
 
 scoot_aq_sites <- read_csv(paste0("S:\\SUSTAIN\\EnvQual\\Air_Quality\\Projects\\R Projects\\airquality_GIT\\data\\scoot_aq.csv"), col_types = cols(LinkID = col_character(), siteid = col_integer(), sk_dim_countdeviceid = col_character(),   sk_dim_journeylinkid = col_character()))
 
@@ -128,8 +130,8 @@ groupby_str_tc <-  "sk_dim_countdeviceid, countsitefullname, date_format(rollupd
 where_str_tc <- paste0("rollupdatetime IN ['2019-01-01T00:00:00' TO '", dateTo, "T00:00:00'] AND (", count_sitestring, ")")
 base_url_tc <- "https://opendata.bristol.gov.uk/api/v2/catalog/datasets/fact-traffic-counts/aggregates/"
 
-qry_list_tc <- list(select = select_str_tc, group_by = groupby_str_tc, where = where_str_tc, apikey = apikey)# apikey is in the query rather than in an authenticate argument
-#retrieve the response object
+qry_list_tc <- list(select = select_str_tc, group_by = groupby_str_tc, where = where_str_tc, apikey = apikey)# apikey is in the query not in an authenticate argument
+
 r_tc <- GET(url = base_url_tc, query = qry_list_tc)
 
 count_data <- content(r_tc, as="text") %>% 
@@ -137,10 +139,8 @@ count_data <- content(r_tc, as="text") %>%
     `[[`("aggregations") %>% 
     inner_join(scoot_aq_sites, by = "sk_dim_countdeviceid") %>% 
     group_by(siteid, site, date) %>% 
-    summarise(sum_daily_flow = sum(flow)) #%>% 
-    # summarise(aadt = mean(sum_daily_flow, na.rm = T), .groups = "drop")
+    summarise(sum_daily_flow = sum(flow)) 
 
-    
 journey_sitestring <- paste0("sk_dim_journeylinkid = ", unique(pull(scoot_aq_sites, sk_dim_journeylinkid)), collapse = " OR ")
 
 select_str_jl <- "sk_dim_journeylinkid, AVG(weightedavgspeed) as avg_speed, AVG(weightedjt) as avg_jt, journeylinkdescription"
@@ -148,10 +148,9 @@ group_by_str_jl <- "sk_dim_journeylinkid, journeylinkdescription ,date_format(ro
 where_str_jl <- paste0("rollupdatetime IN ['2019-01-01T00:00:00' TO '", dateTo, "T00:00:00'] AND (", journey_sitestring, ")")
 base_url_jl <- "https://opendata.bristol.gov.uk/api/v2/catalog/datasets/fact-journey-hourly/aggregates/"
 
-qry_list_jl <- list(select = select_str_jl, group_by = group_by_str_jl, where = where_str_jl, apikey = apikey)# apikey is in the query rather than in an authenticate argument
+qry_list_jl <- list(select = select_str_jl, group_by = group_by_str_jl, where = where_str_jl, apikey = apikey)
 
 r_jl <- GET(url = base_url_jl, query = qry_list_jl)
-
 
 journey_link_data <- content(r_jl, as="text") %>% 
     fromJSON() %>% 
@@ -159,7 +158,6 @@ journey_link_data <- content(r_jl, as="text") %>%
     inner_join(scoot_aq_sites, by = "sk_dim_journeylinkid") %>% 
     group_by(siteid, site, date) %>% 
     summarise(mean_speed = mean(avg_speed, na.rm = T))
-# mean_jt = mean(avg_jt, na.rm = T), .groups = "drop") 
 
 counts_speeds <- count_data %>% 
   left_join(journey_link_data, by = c("siteid" = "siteid", "date" = "date")) %>%
@@ -170,10 +168,6 @@ counts_speeds <- count_data %>%
   pivot_longer(cols = sum_daily_flow:mean_speed, names_to = "parameter") %>% 
   mutate(parameter = ifelse(parameter == "mean_speed", "Speed (mph)", "Daily Flow (vehicles)")) %>% 
   filter(!is.na(value))
-
-
-
-#---------------------------------------------------------------------------------
 
 } else {
 
@@ -271,11 +265,6 @@ met_data_DT_hr <- met_data_DT %>%
          year = as.factor(str_sub(date, 1, 4))) %>% 
   timeAverage(avg.time = "hour") %>% setDT()
 
-#----------------------------------AURN--------------------------
-
-
-
-
 #-----------------------DE WEATHER WRANGLING------------------------------
 #hour average met data, join to AQ data , join to aq_monitors
 #add variables for modelling
@@ -311,10 +300,9 @@ metVars = c("ws", "wd", "hour", "weekday", "temp", "week")
 #keep only pm10 and no2 as model fails with low numbers from pm2.5 and ozone
 #group by pollutant and site type, nesting other columns into a list column, data
 #apply the testMod, buildMod, and metSim models to each data frame by group
-#also create a ggplot object for each de - weathered output and a filename so that they can be 
-#iterative plotted
+#also create a ggplot object for each de - weathered output and a filename so that they can be iteratively plotted
 
-#--------------------------run the deweather model for grouped data---------------------------------
+#-------------run the deweather model for grouped data------------------
 if(update){
 models_plots <- dw_hourly_agg %>%
   pivot_longer(cols = pm10:pm2.5, names_to = "pollutant", values_to = "concentration") %>%
@@ -328,7 +316,7 @@ models_plots <- dw_hourly_agg %>%
     ylab(quickText("ug/m3")) +
     labs(title = quickText(paste0("De - weathered concentrations of ", pollutant, ": ", dw_group)))),
     filename = paste0(dw_group, "_", pollutant, "_", ".png"))
-#-------------------------------------run models by site--------------------------
+#-------------------------------------run models by site--------------------
 
 models_plots_sites <- aq_met_dw_hourly %>%
   pivot_longer(cols = pm10:pm2.5, names_to = "pollutant", values_to = "concentration") %>%
@@ -343,7 +331,7 @@ models_plots_sites <- aq_met_dw_hourly %>%
     labs(title = quickText(paste0("De - weathered concentrations of ", pollutant, ": ", site)))),
     filename = paste0(site, "_", pollutant, "_", ".png"))
 
-save(aq_data_DT, met_data_DT, aq_monitors, core_means_joined, models_plots, models_plots_sites, monthly_tubes, wards, counts_speeds, file = "S:/SUSTAIN/EnvQual/Air_Quality/Projects/R Projects/air_quality_data_management/data/dfs.RData")
+save(aq_data_DT, met_data_DT, aq_monitors, core_means_joined, models_plots, models_plots_sites, monthly_tubes, counts_speeds, file = "S:/SUSTAIN/EnvQual/Air_Quality/Projects/R Projects/air_quality_data_management/data/dfs.RData")
 
 }
 
@@ -430,40 +418,7 @@ dwp_plot <- deweathered_predictions %>%
   easy_plot_legend_size(size = 14) +
   easy_plot_legend_title_size(size = 16) +
   theme(strip.text.y = element_text(color = "black", face = "bold", size = 14, angle = 0))
-#-----------------------------CUSUM WRANGLING------------------------------------
 
-#cusum calcs dodgy - need modelled counterfactual
-
-# cusum_plot_data <- 
-#   aq_data_DT %>% 
-#   select(date, code = siteid, site = location, nox) %>% 
-#   timeAverage(avg.time = "day", type = c("code", "site")) %>%
-#     ungroup() %>% # to get a daily mean - seems adequate
-#     mutate(year = as.integer(format(date, "%Y")),
-#            yday = yday(date) + 2018 - year) %>% #shift julian date by one to ensure delta is
-#     select(-code, -date) %>%                    #like from like, ie monday from monday
-#     filter(between(yday, studyStartDate_julian, lockdown_end_julian),#study period
-#            site != "Colston Avenue") %>% #started nov 2018
-#     pivot_wider(id_cols = c("site", "yday"), names_from = year, values_from = nox, names_prefix = "nox_") %>%
-#   mutate(d = nox_2020 - rowMeans(select(., nox_2018, nox_2019), na.rm = T)) %>% #needs to be befor grouping
-#     group_by(site) %>% 
-#     mutate(delta = ifelse(is.na(d), zoo::na.locf(d), d)) %>% # replace NA with the last valid datapoint in group
-#             mutate(cumsum_delta = cumsum(delta), #here's the magic
-#            date = as.Date("2019-12-31") + yday) #recreate a date column for plotting
-# 
-# cusum_plot <- cusum_plot_data %>% 
-#     ggplot(aes(x = date, y = cumsum_delta)) +
-#  geom_rect(data = rect_df, mapping = aes(x = NULL, y = NULL, xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = fill), alpha = 0.3, color = "black", lty = "dashed") +
-#   scale_fill_manual(values = c("#00AFBB", "#FC4E07")) +
-#   geom_line(lwd = 2, color = "black") +
-#     # geom_smooth(se = F, lwd = 1, color = "black", method = "loess", formula = 'y ~ x') +
-#     facet_wrap( ~ site, scales = "free_y") +
-#   labs(title = "Cumulative sum (cusum) chart of NOx at Bristol sites",
-#        subtitle = "2020 data compared with mean daily concentrations in 2018 - 2019",
-#        x = "Date:2020", y = "Cumulative sum of difference in daily NOx",
-#        fill = "Period") +
-#   theme_report_facet() +
-#   theme(strip.text.x = element_text(face = "bold"))
 ```
 
 ```{r summary calcs, eval = TRUE, include = FALSE}
@@ -629,7 +584,7 @@ city_plot_covid_by_year
 Bristol's city centre site at [Colston Avenue](https://opendata.bristol.gov.uk/pages/aqcontinuoussites/?q=siteid:501) is the most polluted roadside site on the network and so is an interesting example of the reductions during the lockdown. The chart below shows weekly mean concentrations of NOx, NO~2~ and PM~10~ for the baseline and lockdown period. Operational issues between 9th April and 15th April mean that data is incomplete for this period.
 
 ```{r data viz Colston, eval = TRUE, echo = FALSE, warning = FALSE, results = "show", fig.height = 7, fig.width = 11, fig.cap = "Fig 5. Chart of Colston Avenue site by pollutant"}
-#plot bar chart of means by day, all sites except colston
+#plot bar chart of means by day
 sites_weekly <- lockdown_long %>% 
   filter(Pollutant %in% c("NOX", "NO2", "PM10")) %>%
   mutate(siteid = as.factor(siteid)) %>% 
@@ -673,8 +628,6 @@ Diffusion tubes are used to monitor ambient nitrogen dioxide. Nitrogen dioxide f
 The boxplot below shows that there was a significant reduction in concentrations at sites where data was available for all the years analysed when April and May 2020 is compared to those months in other years. 
 
 ```{r data viz diffusion tubes, eval = TRUE, echo = FALSE, warning = FALSE, results = "show", fig.height = 7, fig.width = 11, fig.cap = "Fig 7. mean concentrations of NO2 in April diffusion tubes by year"}
-
- # The median value for 2020 was `r round(medians["2020"])` ugm^-3^ which was `r round((medians["2020"] / min(medians[1:9])) * 100)`% of the previous lowest median April value from `r names(which.min(medians[1:9]))`
 
 monthly_tube_plot
 ```
@@ -815,11 +768,6 @@ dwp_bar_plot
 #cusum_plot
 #removed as unsound
 
-
-## Cumulative Sum (cusum) analysis of traffic pollutants
-# Cusum charts were plotted for sites measuring NOx during March 2020. Cusum charts are used in statistical process control to indicate where a change occurs in a measured variable. In this instance, the difference in daily mean measured concentrations of NOx between the day in 2020 and the mean of the daily values in 2018 and 2019 is plotted. The day is adjusted so that the weekdays are identical to account for the different diurnal variation by weekday.
-# 
-# It can be seen that all sites showed a declining trace from the beginning of March. This is inline with the national picture of declining concentrations of NOx under "business as usual" because of improving engine technology. However, all sites also show an inflection of the trace around the time of the period between the social distancing edict and lockdown proper. There is some evidence that the cusum trace is levelling off towards the end of the analysis period, which is to be expected, as traffic flows stabilise at a minimum or even start to increase.
 ```
 
 
