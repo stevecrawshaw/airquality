@@ -1,3 +1,9 @@
+    wants <- c("tidyverse", "httr", "jsonlite", "glue")
+    has   <- wants %in% rownames(installed.packages())
+    if (any(!has))
+      install.packages(wants[!has])
+    lapply(wants, library, character.only = T)
+    
 importODSAQ <-
   function(pollutant = c("all", "nox", "no2", "no", "pm10", "pm2.5", "o3"),
            siteid = c("203", "215", "463", "270", "500", "501"),
@@ -6,11 +12,7 @@ importODSAQ <-
            includeGeo = FALSE) {
 
     #---------------------------------VARIABLES-----------------------------
-    wants <- c("tidyverse", "httr", "jsonlite")
-    has   <- wants %in% rownames(installed.packages())
-    if (any(!has))
-      install.packages(wants[!has])
-    lapply(wants, library, character.only = T)
+
     
     # dateFrom <- "2020-01-01"
     # dateTo <- "2020-01-02"
@@ -202,9 +204,17 @@ pollutant <- tolower(str_replace(pollutant, "[.]", "")) #make nice for the ODS
     
   }
 
-aq_data <- importODSAQ(
-  siteid = "215",
-  pollutant = "all",
-  dateFrom = "2019-01-01",
-  dateTo = "2019-02-01"
-)
+getODSAggregate <- function(select_str, where_str, groupby_str, dataset, startDate, endDate) {
+  
+base_url <- glue("https://opendata.bristol.gov.uk/api/v2/catalog/datasets/", {dataset}, "/aggregates/")
+qry_list <- list(select = select_str, group_by = groupby_str, where = where_str, apikey = "9ead54a2d8a6781f3169d53bd94d99d10b6b9ff932b8a1b9852da434")
+r <- GET(url = base_url, query = qry_list) 
+if(!http_error(r)){ #FALSE = no error
+
+content(r, as="text") %>% 
+    fromJSON() %>% 
+  `[[`("aggregations") %>% 
+    return()
+}
+}
+

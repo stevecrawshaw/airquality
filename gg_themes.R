@@ -1,4 +1,4 @@
-wants <- c("tidyverse", "here", "openair")
+wants <- c("tidyverse")
 has   <- wants %in% rownames(installed.packages())
 if(any(!has)) install.packages(wants[!has])
 lapply(wants, library, character.only=T)
@@ -45,6 +45,7 @@ theme_report_facet <- function () {
             plot.background = element_rect(fill="white", colour = NA), 
             legend.background = element_rect(fill="transparent", colour=NA),
             legend.key = element_rect(fill="transparent", colour=NA),
+            legend.text = element_text(size = 18),
             strip.text.y = element_text(color = "black", face = "bold")
             )
 }
@@ -78,6 +79,54 @@ theme_ppt_single <- function(){
         )
     
 }
+
+# theme_void => theme_web_void
+theme_web_void <- function() {
+  theme_void() + 
+    theme(plot.title = element_text(size = 16, face = "bold",
+                                    hjust = .5,
+                                    margin = margin(t = 5, b = 25)),
+          plot.caption = element_text(size = 12, hjust = 0, 
+                                      margin = margin(t = 15)),
+          legend.title = element_text(size = 14, face = "bold"),
+          legend.text = element_text(size = 14),
+          strip.text = element_text(size = 14, face = "bold"))
+}
+
+# theme_bw => theme_web_bw
+theme_web_bw <- function() {
+  theme_bw() + # note ggplot2 theme is used as a basis
+    theme(plot.title = element_text(size = 16, face = "bold",
+                                    hjust = .5,
+                                    margin = margin(t = 5, b = 25)),
+          plot.caption = element_text(size = 12, hjust = 0, 
+                                      margin = margin(t = 15)),
+          panel.grid.major = element_line(colour = "grey88"),
+          panel.grid.minor = element_blank(),
+          legend.title = element_text(size = 14, face = "bold"),
+          legend.text = element_text(size = 14),
+          strip.text = element_text(size = 14, face = "bold"),
+          axis.text = element_text(size = 14),
+          axis.title.x = element_text(margin = margin(t = 10), size = 15),
+          axis.title.y = element_text(margin = margin(r = 10), size = 15))
+}
+
+# theme_classic => theme_web_classic
+theme_web_classic <- function() {
+  theme_classic() + 
+    theme(plot.title = element_text(size = 16, face = "bold",
+                                    hjust = .5,
+                                    margin = margin(t = 5, b = 25)),
+          plot.caption = element_text(size = 12, hjust = 0, 
+                                      margin = margin(t = 15)),
+          legend.title = element_text(size = 14, face = "bold"),
+          legend.text = element_text(size = 14),
+          strip.text = element_text(size = 14, face = "bold"),
+          axis.text = element_text(size = 14),
+          axis.title.x = element_text(margin = margin(t = 10), size = 15),
+          axis.title.y = element_text(margin = margin(r = 10), size = 15))
+}
+
 
 #test plot single ppt
 # single_ppt <- plot_DT %>%
